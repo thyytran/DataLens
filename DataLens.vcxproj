@@ -1,0 +1,390 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="source\Config.cpp" />
+    <ClCompile Include="source\FetchPDB.cpp" />
+    <ClCompile Include="source\graphics\RayCaster.cpp" />
+    <ClCompile Include="include\imgui\imgui.cpp" />
+    <ClCompile Include="include\imgui\imgui_demo.cpp" />
+    <ClCompile Include="include\imgui\imgui_draw.cpp" />
+    <ClCompile Include="include\imgui\imgui_impl_glfw.cpp" />
+    <ClCompile Include="include\imgui\imgui_impl_opengl3.cpp" />
+    <ClCompile Include="include\imgui\imgui_tables.cpp" />
+    <ClCompile Include="include\imgui\imgui_widgets.cpp" />
+    <ClCompile Include="source\assistant\ChatWindow.cpp" />
+    <ClCompile Include="source\bio\AminoAcid.cpp" />
+    <ClCompile Include="source\bio\Helix.cpp" />
+    <ClCompile Include="source\bio\MoleculeData.cpp" />
+    <ClCompile Include="source\Camera.cpp" />
+    <ClCompile Include="source\cfd\CFDWaveBox.cpp" />
+    <ClCompile Include="source\Clock.cpp" />
+    <ClCompile Include="source\ColorCommand.cpp" />
+    <ClCompile Include="source\glad.c" />
+    <ClCompile Include="source\graphics\Color.cpp" />
+    <ClCompile Include="source\graphics\Connector.cpp" />
+    <ClCompile Include="source\graphics\ConnectorTemplate.cpp" />
+    <ClCompile Include="source\graphics\Model.cpp" />
+    <ClCompile Include="source\graphics\Shader.cpp" />
+    <ClCompile Include="source\graphics\SphereTemplate.cpp" />
+    <ClCompile Include="source\graphics\Window.cpp" />
+    <ClCompile Include="source\HTTPConnection.cpp" />
+    <ClCompile Include="source\Input.cpp" />
+    <ClCompile Include="source\main.cpp" />
+    <ClCompile Include="source\mapper\PDBToUnitProtMapper.cpp" />
+    <ClCompile Include="source\math\MathUtils.cpp" />
+    <ClCompile Include="source\bio\PDBFile.cpp" />
+    <ClCompile Include="source\bio\Protein.cpp" />
+    <ClCompile Include="source\mutation\MutationAnalyzer.cpp" />
+    <ClCompile Include="source\mutation\MutationSuggester.cpp" />
+    <ClCompile Include="source\mutation\StructureComparison.cpp" />
+    <ClCompile Include="source\Parser.cpp" />
+    <ClCompile Include="source\ResourceManager.cpp" />
+    <ClCompile Include="source\Selection.cpp" />
+    <ClCompile Include="source\UniProtService.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="include\alphamissense\AlphaMissenseDB.h" />
+    <ClInclude Include="include\alphamissense\AlphaMissenseSummary.h" />
+    <ClInclude Include="include\assistant\APIHandler.h" />
+    <ClInclude Include="include\assistant\ChatWindow.h" />
+    <ClInclude Include="include\cfd\CFDWaveBox.h" />
+    <ClInclude Include="include\Config.h" />
+    <ClInclude Include="include\FetchPDB.h" />
+    <ClInclude Include="include\bio\AminoAcid.h" />
+    <ClInclude Include="include\bio\Atom.h" />
+    <ClInclude Include="include\bio\Chain.h" />
+    <ClInclude Include="include\bio\ConnectorType.h" />
+    <ClInclude Include="include\bio\Residue.h" />
+    <ClInclude Include="include\bio\MoleculeData.h" />
+    <ClInclude Include="include\Camera.h" />
+    <ClInclude Include="include\Clock.h" />
+    <ClInclude Include="include\bio\DisulfideBond.h" />
+    <ClInclude Include="include\ColorCommand.h" />
+    <ClInclude Include="include\graphics\Color.h" />
+    <ClInclude Include="include\graphics\Connector.h" />
+    <ClInclude Include="include\graphics\ConnectorTemplate.h" />
+    <ClInclude Include="include\graphics\RayCaster.h" />
+    <ClInclude Include="include\graphics\stb_image.h" />
+    <ClInclude Include="include\mutation\MutationState.h" />
+    <ClInclude Include="include\mutation\StructureComparison.h" />
+    <ClInclude Include="include\graphics\Tooltip.h" />
+    <ClInclude Include="include\imgui\imconfig.h" />
+    <ClInclude Include="include\imgui\imgui.h" />
+    <ClInclude Include="include\imgui\imgui_impl_glfw.h" />
+    <ClInclude Include="include\imgui\imgui_impl_opengl3.h" />
+    <ClInclude Include="include\imgui\imgui_impl_opengl3_loader.h" />
+    <ClInclude Include="include\imgui\imgui_internal.h" />
+    <ClInclude Include="include\imgui\imstb_rectpack.h" />
+    <ClInclude Include="include\imgui\imstb_textedit.h" />
+    <ClInclude Include="include\imgui\imstb_truetype.h" />
+    <ClInclude Include="include\inspector\DrawableMesh.h" />
+    <ClInclude Include="include\inspector\DrawableModel.h" />
+    <ClInclude Include="include\graphics\Model.h" />
+    <ClInclude Include="include\graphics\Shader.h" />
+    <ClInclude Include="include\graphics\SphereTemplate.h" />
+    <ClInclude Include="include\graphics\Window.h" />
+    <ClInclude Include="include\bio\Helix.h" />
+    <ClInclude Include="include\HTTPConnection.h" />
+    <ClInclude Include="include\Input.h" />
+    <ClInclude Include="include\inspector\BehaviorInspector.h" />
+    <ClInclude Include="include\mapper\PDBToUniProtMapper.h" />
+    <ClInclude Include="include\math\Mat.h" />
+    <ClInclude Include="include\math\MathUtils.h" />
+    <ClInclude Include="include\math\Vec.h" />
+    <ClInclude Include="include\math\Vec_2.h" />
+    <ClInclude Include="include\math\Vec_3.h" />
+    <ClInclude Include="include\math\Vec_4.h" />
+    <ClInclude Include="include\bio\PDBFile.h" />
+    <ClInclude Include="include\bio\Protein.h" />
+    <ClInclude Include="include\mutation\MutationAnalyzer.h" />
+    <ClInclude Include="include\mutation\MutationSuggester.h" />
+    <ClInclude Include="include\Parser.h" />
+    <ClInclude Include="include\ResourceManager.h" />
+    <ClInclude Include="include\bio\Sheet.h" />
+    <ClInclude Include="include\Selection.h" />
+    <ClInclude Include="include\UniProtService.h" />
+    <ClInclude Include="lib\curl-7.71.1-win64-mingw\include\curl\curl.h" />
+    <ClInclude Include="lib\curl-7.71.1-win64-mingw\include\curl\curlver.h" />
+    <ClInclude Include="lib\curl-7.71.1-win64-mingw\include\curl\easy.h" />
+    <ClInclude Include="lib\curl-7.71.1-win64-mingw\include\curl\mprintf.h" />
+    <ClInclude Include="lib\curl-7.71.1-win64-mingw\include\curl\multi.h" />
+    <ClInclude Include="lib\curl-7.71.1-win64-mingw\include\curl\stdcheaders.h" />
+    <ClInclude Include="lib\curl-7.71.1-win64-mingw\include\curl\system.h" />
+    <ClInclude Include="lib\curl-7.71.1-win64-mingw\include\curl\typecheck-gcc.h" />
+    <ClInclude Include="lib\curl-7.71.1-win64-mingw\include\curl\urlapi.h" />
+    <ClInclude Include="lib\glad\glad.h" />
+    <ClInclude Include="lib\glew-2.1.0-win32\glew-2.1.0\include\GL\eglew.h" />
+    <ClInclude Include="lib\glew-2.1.0-win32\glew-2.1.0\include\GL\glew.h" />
+    <ClInclude Include="lib\glew-2.1.0-win32\glew-2.1.0\include\GL\glxew.h" />
+    <ClInclude Include="lib\glew-2.1.0-win32\glew-2.1.0\include\GL\wglew.h" />
+    <ClInclude Include="lib\glfw-3.4.bin.WIN64\include\GLFW\glfw3.h" />
+    <ClInclude Include="lib\glfw-3.4.bin.WIN64\include\GLFW\glfw3native.h" />
+    <ClInclude Include="lib\KHR\khrplatform.h" />
+    <ClInclude Include="lib\nlohmann\adl_serializer.hpp" />
+    <ClInclude Include="lib\nlohmann\byte_container_with_subtype.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\abi_macros.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\conversions\from_json.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\conversions\to_chars.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\conversions\to_json.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\exceptions.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\hash.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\input\binary_reader.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\input\input_adapters.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\input\json_sax.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\input\lexer.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\input\parser.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\input\position_t.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\iterators\internal_iterator.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\iterators\iteration_proxy.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\iterators\iterator_traits.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\iterators\iter_impl.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\iterators\json_reverse_iterator.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\iterators\primitive_iterator.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\json_custom_base_class.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\json_pointer.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\json_ref.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\macro_scope.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\macro_unscope.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\meta\call_std\begin.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\meta\call_std\end.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\meta\cpp_future.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\meta\detected.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\meta\identity_tag.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\meta\is_sax.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\meta\std_fs.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\meta\type_traits.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\meta\void_t.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\output\binary_writer.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\output\output_adapters.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\output\serializer.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\string_concat.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\string_escape.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\string_utils.hpp" />
+    <ClInclude Include="lib\nlohmann\detail\value_t.hpp" />
+    <ClInclude Include="lib\nlohmann\json.hpp" />
+    <ClInclude Include="lib\nlohmann\json_fwd.hpp" />
+    <ClInclude Include="lib\nlohmann\ordered_map.hpp" />
+    <ClInclude Include="lib\nlohmann\thirdparty\hedley\hedley.hpp" />
+    <ClInclude Include="lib\nlohmann\thirdparty\hedley\hedley_undef.hpp" />
+    <ClInclude Include="lib\obj\OBJ_Loader.h" />
+    <ClInclude Include="source\assistant\APIHandler.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="config.json" />
+    <None Include="lib\curl-7.71.1-win64-mingw\bin\libcurl-x64.def" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\build_8md.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\build_guide.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\compat_8md.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\compat_guide.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\compile_8md.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\compile_guide.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\context_8md.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\context_guide.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\deprecated.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\dir_13577e2d8b9423099662de029791bd7d.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\dir_7f92719a7fe62e5b064f87d7a3c220b1.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\dir_a788ef6c2b1e5b367804e0b6ccfd6f11.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\dir_b11153cd0f4fd04a7564cc166f482635.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\files.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\glfw3native_8h.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\glfw3native_8h_source.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\glfw3_8h.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\glfw3_8h_source.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\group__buttons.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\group__context.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\group__errors.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\group__gamepad__axes.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\group__gamepad__buttons.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\group__hat__state.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\group__init.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\group__input.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\group__joysticks.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\group__keys.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\group__mods.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\group__monitor.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\group__native.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\group__shapes.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\group__vulkan.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\group__window.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\index.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\input_8md.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\input_guide.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\internals_guide.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\internal_8md.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\intro_8md.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\intro_guide.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\main_8md.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\monitor_8md.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\monitor_guide.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\moving_8md.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\moving_guide.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\news.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\news_8md.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\pages.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\quick_8md.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\quick_guide.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\struct_g_l_f_wallocator.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\struct_g_l_f_wgamepadstate.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\struct_g_l_f_wgammaramp.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\struct_g_l_f_wimage.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\struct_g_l_f_wvidmode.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\topics.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\vulkan_8md.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\vulkan_guide.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\window_8md.html" />
+    <None Include="lib\glfw-3.4.bin.WIN64\docs\html\window_guide.html" />
+    <None Include="source\math\Mat.inl" />
+    <None Include="source\math\MathUtils.inl" />
+    <None Include="source\math\Vec.inl" />
+    <None Include="source\math\Vec_2.inl" />
+    <None Include="source\math\Vec_3.inl" />
+    <None Include="source\math\Vec_4.inl" />
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>15.0</VCProjectVersion>
+    <ProjectGuid>{03301C8B-9EF3-4443-A2B7-C118C8A1EDCC}</ProjectGuid>
+    <RootNamespace>CppMol</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>DataLens</ProjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <CodeAnalysisRuleSet>AllRules.ruleset</CodeAnalysisRuleSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <CodeAnalysisRuleSet>AllRules.ruleset</CodeAnalysisRuleSet>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <SDLCheck>true</SDLCheck>
+      <ConformanceMode>true</ConformanceMode>
+      <AdditionalIncludeDirectories>C:\Users\Thy\OneDrive\Documents\GitHub\thyytran\datalens\lib\curl-7.71.1-win64-mingw\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <AdditionalLibraryDirectories>C:\Users\Thy\OneDrive\Documents\GitHub\thyytran\datalens\lib\curl-7.71.1-win64-mingw\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>libcurl.a;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <SDLCheck>true</SDLCheck>
+      <ConformanceMode>true</ConformanceMode>
+      <AdditionalIncludeDirectories>C:\Users\Thy\OneDrive\Documents\GitHub\thyytran\datalens\lib\curl-7.71.1-win64-mingw\include;C:\Users\Thy\OneDrive\Documents\GitHub\thyytran\datalens\include;C:\Users\Thy\OneDrive\Documents\GitHub\thyytran\datalens\lib\glew-2.1.0-win32\glew-2.1.0\include;C:\Users\Thy\OneDrive\Documents\GitHub\thyytran\datalens\lib\glfw-3.4.bin.WIN64\include;C:\Users\Thy\OneDrive\Documents\GitHub\thyytran\datalens\include\openai;C:\Users\Thy\OneDrive\Documents\GitHub\thyytran\datalens\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_HAS_STD_BYTE=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <AdditionalLibraryDirectories>C:\Users\Thy\OneDrive\Documents\GitHub\thyytran\datalens\lib\curl-7.71.1-win64-mingw\lib;C:\Users\Thy\OneDrive\Documents\GitHub\thyytran\datalens\lib\glew-2.1.0-win32\glew-2.1.0\lib\Release\x64;C:\Users\Thy\OneDrive\Documents\GitHub\thyytran\datalens\lib\glfw-3.4.bin.WIN64\lib-vc2022;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>libcurl.a;libcurl.dll.a;glfw3.lib;opengl32.lib;glu32.lib;glew32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <ConformanceMode>true</ConformanceMode>
+      <AdditionalIncludeDirectories>C:\Users\Thy\OneDrive\Documents\GitHub\thyytran\datalens\lib\curl-7.71.1-win64-mingw\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <AdditionalLibraryDirectories>C:\Users\Thy\OneDrive\Documents\GitHub\thyytran\datalens\lib\curl-7.71.1-win64-mingw\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>libcurl.a;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <ConformanceMode>true</ConformanceMode>
+      <AdditionalIncludeDirectories>C:\Users\Thy\OneDrive\Documents\GitHub\thyytran\datalens\lib\curl-7.71.1-win64-mingw\include;C:\Users\Thy\OneDrive\Documents\GitHub\thyytran\datalens\include;C:\Users\Thy\OneDrive\Documents\GitHub\thyytran\datalens\lib\glew-2.1.0-win32\glew-2.1.0\include;C:\Users\Thy\OneDrive\Documents\GitHub\thyytran\datalens\lib\glfw-3.4.bin.WIN64\include;C:\Users\Thy\OneDrive\Documents\GitHub\thyytran\datalens\include\openai;C:\Users\Thy\OneDrive\Documents\GitHub\thyytran\datalens\lib\json-develop;C:\Users\Thy\OneDrive\Documents\GitHub\thyytran\datalens\lib\KHR;C:\Users\Thy\OneDrive\Documents\GitHub\thyytran\datalens\lib\obj;C:\Users\Thy\OneDrive\Documents\GitHub\thyytran\datalens\lib\nlohmann;C:\Users\Thy\OneDrive\Documents\GitHub\thyytran\datalens\lib\glm;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <AdditionalLibraryDirectories>C:\Users\Thy\OneDrive\Documents\GitHub\thyytran\datalens\lib\curl-7.71.1-win64-mingw\lib;C:\Users\Thy\OneDrive\Documents\GitHub\thyytran\datalens\lib\glew-2.1.0-win32\glew-2.1.0\lib\Release\x64;C:\Users\Thy\OneDrive\Documents\GitHub\thyytran\datalens\lib\glfw-3.4.bin.WIN64\lib-vc2022;C:\libs\vcpkg;C:\Users\Thy\OneDrive\Documents\GitHub\thyytran\datalens\lib\nlohmann;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>libcurl.a;libcurl.dll.a;glfw3.lib;opengl32.lib;glu32.lib;glew32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

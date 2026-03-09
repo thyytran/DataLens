@@ -1,0 +1,51 @@
+﻿# ── Credentials ────────────────────────────────────────────────────────────
+config.json
+
+# ── Visual Studio build output ────────────────────────────────────────────
+x64/
+x86/
+Debug/
+Release/
+*.exe
+*.ilk
+*.pdb
+*.exp
+*.lib
+*.obj
+*.idb
+*.ipdb
+*.iobj
+*.log
+*.tlog
+
+# ── Visual Studio project internals ───────────────────────────────────────
+.vs/
+*.user
+*.suo
+*.ncb
+*.sdf
+*.opensdf
+*.VC.db
+*.VC.opendb
+ipch/
+
+# ── GLM cmake build artifacts (keep source, ignore build) ─────────────────
+lib/glm/cmake-build-debug/
+
+# ── GLFW docs (keep headers + .lib, ignore html docs) ─────────────────────
+lib/glfw-3.4.bin.WIN64/docs/
+
+# ── Runtime DLLs (document in README instead) ─────────────────────────────
+glew32.dll
+glfw3.dll
+libcurl-x64.dll
+libcrypto-1_1-x64.dll
+libssl-1_1-x64.dll
+
+# ── ImGui runtime state ────────────────────────────────────────────────────
+imgui.ini
+
+# ── OS files ──────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
