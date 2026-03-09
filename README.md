@@ -84,7 +84,6 @@ Project Properties → Debugging → Working Directory → $(SolutionDir)
 
 ```
 fetch pdb <pdb_id>       Load a structure from RCSB (e.g. fetch pdb 7LMK)
-showmutations            Load AlphaMissense data for all residues
 rotate <x|y|z>           Rotate the model
 setdefault               Reset colors and radii to default
 leave                    Clear the current structure
@@ -126,8 +125,6 @@ DataLens/
 └── README.md
 ```
 
----
-
 ## Acknowledgements
 
-Developed as a Master's thesis project at Northeastern University (Khoury College of Computer Sciences). Domain validation by protein design scientists at Moderna.
+Developed as a Master's thesis project at Northeastern University (College of Engineering). 
