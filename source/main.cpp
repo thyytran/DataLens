@@ -2845,6 +2845,7 @@ void renderingThread() {
 							sel.chain = chain;
 							Color highlight = Color::fromByte(255, 165, 0); // orange
 							Model::setAtomColor(&highlight, &sel);
+							Model::setAtomRadius(0.04f, &sel);
 							selectedAtomIndex = std::nullopt; // clear so A-key works fresh
 						}
 						ImGui::PopStyleColor();
