@@ -17,7 +17,6 @@
 #include "imgui/imgui_impl_glfw.h"
 #include "imgui/imgui_impl_opengl3.h"
 #include "nlohmann/json.hpp"
-#include "openai.hpp"
 
 // ── Math ───────────────────────────────────────────────────────────────────
 #include "math/Vec.h"
@@ -49,6 +48,7 @@
 
 // ── Application ────────────────────────────────────────────────────────────
 #include "assistant/ChatWindow.h"
+#include "assistant/ClaudeHandler.h"
 #include "ColorCommand.h"
 #include "FetchPDB.h"
 #include "Input.h"
@@ -1422,6 +1422,16 @@ void renderingThread() {
 	Camera camera(Vec3(0.0f, 0.0f, 15.0f));
 	Selection selection;
 
+	// Claude handler variables
+	ClaudeHandler claudeHandler;
+	claudeHandler.loadConfig("config.json");
+
+	if (!claudeHandler.loadConfig("config.json")) {
+		claudeHandler.setApiKey(config.aiApiKey);  // fallback to already-loaded key
+	}
+
+	bool claudePending = false;
+
 	json variantData = json::array();
 	std::set<int> variantPositions;
 	int selectedPosition = -1;
@@ -2300,6 +2310,15 @@ void renderingThread() {
 			continue;  // Skip this frame entirely
 		}
 
+		// Poll Claude response — fires once when worker thread finishes
+		if (claudePending && claudeHandler.isReady()) {
+			std::string reply = claudeHandler.getResponse();
+			if (!reply.empty()) {
+				addChatMessage("Assistant", reply);
+			}
+			claudePending = false;
+		}
+
 		// Start ImGui frame
 		ImGui_ImplOpenGL3_NewFrame();
 		ImGui_ImplGlfw_NewFrame();
@@ -2718,20 +2737,26 @@ void renderingThread() {
 			ImVec2((float)window.getWidth() - 420.0f, (float)window.getHeight() - 380.0f),
 			ImGuiCond_FirstUseEver
 		);
-		ImGui::SetNextWindowSizeConstraints(
-			ImVec2(300.0f, 200.0f),   // min size
-			ImVec2(600.0f, 500.0f) // max size
-		);
+		ImGui::SetNextWindowSizeConstraints(ImVec2(300.0f, 200.0f), ImVec2(600.0f, 500.0f));
 		ImGui::SetNextWindowSize(ImVec2(400.0f, 360.0f), ImGuiCond_FirstUseEver);
-
-		ImGui::Begin("AI Assistant");  // ← Chat begin
+		ImGui::Begin("AI Assistant");
 
 		ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "AI Chat Assistant");
+
+		// Show current mutation context as a subtitle if available
+		if (mutFocus.show && !mutFocus.variantId.empty()) {
+			ImGui::SameLine();
+			ImGui::TextDisabled(" | %s  DDG %+.2f  AM %.2f",
+				mutFocus.variantId.c_str(),
+				mutFocus.ddg,
+				mutFocus.amScore);
+		}
+
 		ImGui::Separator();
 		ImGui::Spacing();
 
-		// Chat history
-		ImGui::BeginChild("ChatHistory", ImVec2(0, -100), true);  // ← Child begin
+		// ── Chat history scroll region ────────────────────────────────
+		ImGui::BeginChild("ChatHistory", ImVec2(0, -100), true);
 		{
 			std::lock_guard<std::mutex> lock(chatMutex);
 			for (const auto& msg : chatHistory) {
@@ -2739,31 +2764,116 @@ void renderingThread() {
 					ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "%s", msg.c_str());
 				}
 				else if (msg.find("Assistant:") == 0) {
-					ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "%s", msg.c_str());
+					// Wrap long responses — TextWrapped respects window width
+					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 1.0f, 0.4f, 1.0f));
+					ImGui::TextWrapped("%s", msg.c_str());
+					ImGui::PopStyleColor();
 				}
 				else {
+					// System messages (e.g. protein loaded notification)
+					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 0.6f, 0.6f, 1.0f));
 					ImGui::TextWrapped("%s", msg.c_str());
+					ImGui::PopStyleColor();
 				}
 				ImGui::Spacing();
 			}
 		}
-		if (chatProcessing) {
-			ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.4f, 1.0f), "Thinking...");
-		}
-		ImGui::SetScrollHereY(1.0f);
-		ImGui::EndChild();  // ← Child end
 
-		// Input area
+		// Animated thinking indicator
+		if (claudePending) {
+			static float dotTimer = 0.0f;
+			dotTimer += ImGui::GetIO().DeltaTime;
+			int dots = (int)(dotTimer * 2.0f) % 4;   // cycles 0-3
+			std::string thinking = "Thinking" + std::string(dots, '.');
+			ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.4f, 1.0f), "%s", thinking.c_str());
+		}
+
+		ImGui::SetScrollHereY(1.0f);  // auto-scroll to latest message
+		ImGui::EndChild();
+
+		// ── Input area ────────────────────────────────────────────────
 		ImGui::Separator();
-		ImGui::InputTextMultiline("##input", chatInputBuffer, 512, ImVec2(-1, 40));
-		if (ImGui::Button("Send", ImVec2(100, 0)) && strlen(chatInputBuffer) > 0) {
+		ImGui::Spacing();
+
+		// Submit on Enter (but allow Shift+Enter for newline)
+		bool submitOnEnter = ImGui::IsKeyPressed(ImGuiKey_Enter)
+			&& !ImGui::GetIO().KeyShift
+			&& ImGui::IsItemFocused();
+
+		ImGui::SetNextItemWidth(-1);
+		ImGui::InputTextMultiline(
+			"##chat_input",
+			chatInputBuffer, sizeof(chatInputBuffer),
+			ImVec2(-1.0f, 40.0f),
+			ImGuiInputTextFlags_EnterReturnsTrue
+		);
+
+		bool sendPressed = ImGui::Button("Send", ImVec2(80, 0));
+
+		// "Ask about selected mutation" shortcut button
+		if (mutFocus.show && !mutFocus.variantId.empty()) {
+			ImGui::SameLine();
+			if (ImGui::Button("Ask about mutation", ImVec2(0, 0))) {
+				std::snprintf(
+					chatInputBuffer, sizeof(chatInputBuffer),
+					"Explain the clinical significance of %s (DDG %+.2f kcal/mol, AlphaMissense %s %.2f)",
+					mutFocus.variantId.c_str(),
+					mutFocus.ddg,
+					mutFocus.amClass.c_str(),
+					mutFocus.amScore
+				);
+			}
+		}
+
+		// ── Send logic ────────────────────────────────────────────────
+		if ((sendPressed || submitOnEnter) && strlen(chatInputBuffer) > 0 && !claudePending) {
 			std::string userMessage(chatInputBuffer);
 			addChatMessage("You", userMessage);
-			addChatMessage("Assistant", "Response coming soon!");
 			chatInputBuffer[0] = '\0';
+
+			// ── Build MutationContext from current mutFocus state ─────
+			MutationContext ctx;
+			ctx.proteinName = currentPdbId.empty() ? std::nullopt
+				: std::optional<std::string>(currentPdbId);
+
+			if (mutFocus.show && !mutFocus.variantId.empty()) {
+				if (!mutFocus.wtAA.empty())  ctx.wildTypeAA = mutFocus.wtAA;
+				if (!mutFocus.mutAA.empty()) ctx.mutantAA = mutFocus.mutAA;
+				if (mutFocus.position > 0)   ctx.residueNum = mutFocus.position;
+				if (!mutFocus.chain.empty()) ctx.chain = mutFocus.chain;
+
+				if (!mutFocus.analyzing) {
+					ctx.amScore = mutFocus.amScore;
+					ctx.amClass = mutFocus.amClass;
+					ctx.ddg = mutFocus.ddg;
+				}
+			}
+
+			// Replay last N turns for multi-turn context (cap at 6 to stay within tokens)
+			{
+				std::lock_guard<std::mutex> lock(chatMutex);
+				const int MAX_HISTORY_TURNS = 6;
+				int start = std::max(0, (int)chatHistory.size() - MAX_HISTORY_TURNS * 2);
+				for (int i = start; i < (int)chatHistory.size(); ++i) {
+					const auto& entry = chatHistory[i];
+					if (entry.find("You: ") == 0)
+						ctx.history.push_back({ "user", entry.substr(5) });
+					else if (entry.find("Assistant: ") == 0)
+						ctx.history.push_back({ "assistant", entry.substr(11) });
+				}
+			}
+
+			// ── Fire async query ──────────────────────────────────────
+			bool sent = claudeHandler.query(ctx, userMessage, nullptr); // poll-based, no callback
+			if (sent) {
+				claudePending = true;
+			}
+			else {
+				addChatMessage("System", "A query is already in flight. Please wait.");
+			}
 		}
 
-		ImGui::End();  // ← Chat end
+		ImGui::End();  // AI Assistant end
 
 		// Mutation Panel Starts 
 		if (mutationPanel.showWindow || mutationPanel.loading) {
