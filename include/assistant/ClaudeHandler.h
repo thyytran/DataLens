@@ -32,6 +32,9 @@ struct MutationContext {
     // FoldX
     std::optional<float>       ddg;            // ΔΔG in kcal/mol (positive = destabilizing)
 
+    // Injected by DataLensMemory — previous sessions, mutations, prior summaries
+    std::string memoryContext;
+
     // Conversation history for multi-turn chat
     std::vector<std::pair<std::string, std::string>> history; // {role, content}
 
