@@ -19,6 +19,49 @@ Shader::Shader(const std::string &vertexShaderSource, const std::string &fragmen
 }
 
 /*
+ * Constructor for the Shader class.
+ * This constructor creates a shader program from source. 
+ */
+Shader::Shader(const std::string& vertexSource, const std::string& fragmentSource, bool fromSource) {
+	id = 0;
+	projectionLocation = 0;
+	viewLocation = 0;
+	modelLocation = 0;
+	normalLocation = 0;
+
+	// Compile vertex shader
+	unsigned int vertexShader = glCreateShader(GL_VERTEX_SHADER);
+	const char* vSource = vertexSource.c_str();
+	glShaderSource(vertexShader, 1, &vSource, NULL);
+	glCompileShader(vertexShader);
+	checkShaderCompileErrors(vertexShader, ShaderType::VERTEX);
+
+	// Compile fragment shader
+	unsigned int fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+	const char* fSource = fragmentSource.c_str();
+	glShaderSource(fragmentShader, 1, &fSource, NULL);
+	glCompileShader(fragmentShader);
+	checkShaderCompileErrors(fragmentShader, ShaderType::FRAGMENT);
+
+	// Link program
+	id = glCreateProgram();
+	glAttachShader(id, vertexShader);
+	glAttachShader(id, fragmentShader);
+	glLinkProgram(id);
+	checkShaderLinkErrors(id);
+
+	// Clean up
+	glDeleteShader(vertexShader);
+	glDeleteShader(fragmentShader);
+
+	// Get uniform locations
+	projectionLocation = glGetUniformLocation(id, "u_projection");
+	viewLocation = glGetUniformLocation(id, "u_view");
+	modelLocation = glGetUniformLocation(id, "u_model");
+	normalLocation = glGetUniformLocation(id, "u_normal");
+}
+
+/*
  *  Checks for shader compilation errors.
  *  @param id         The ID of the shader object.
  *  @param shaderType The type of the shader (vertex or fragment).
@@ -286,6 +329,41 @@ const Shader *Shader::getSphereDefault() {
  */
 const Shader *Shader::getConnectorDefault() {
 	return connector;
+}
+
+Shader* Shader::createFromSource(const char* vertexSource, const char* fragmentSource) {
+	Shader* shader = new Shader();
+
+	// Compile vertex shader
+	unsigned int vertexShader = glCreateShader(GL_VERTEX_SHADER);
+	glShaderSource(vertexShader, 1, &vertexSource, NULL);
+	glCompileShader(vertexShader);
+	shader->checkShaderCompileErrors(vertexShader, ShaderType::VERTEX);
+
+	// Compile fragment shader
+	unsigned int fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+	glShaderSource(fragmentShader, 1, &fragmentSource, NULL);
+	glCompileShader(fragmentShader);
+	shader->checkShaderCompileErrors(fragmentShader, ShaderType::FRAGMENT);
+
+	// Link program
+	shader->id = glCreateProgram();
+	glAttachShader(shader->id, vertexShader);
+	glAttachShader(shader->id, fragmentShader);
+	glLinkProgram(shader->id);
+	shader->checkShaderLinkErrors(shader->id);
+
+	// Clean up
+	glDeleteShader(vertexShader);
+	glDeleteShader(fragmentShader);
+
+	// Cache uniform locations
+	shader->projectionLocation = glGetUniformLocation(shader->id, "u_projection");
+	shader->viewLocation = glGetUniformLocation(shader->id, "u_view");
+	shader->modelLocation = glGetUniformLocation(shader->id, "u_model");
+	shader->normalLocation = glGetUniformLocation(shader->id, "u_normal");
+
+	return shader;
 }
 
 /*

@@ -22,6 +22,7 @@ private:
 
 	static Shader *sphere;
 	static Shader *connector;
+	Shader() = default; 
 
 	void checkShaderCompileErrors(unsigned int id, ShaderType shaderType);
 	void checkShaderLinkErrors(unsigned int id);
@@ -29,6 +30,8 @@ private:
 
 public:
 	Shader(const std::string &vertexShaderSource, const std::string &fragmentShaderSource);
+	Shader(const std::string& vertexSource, const std::string& fragmentSource, bool fromSource);
+
 
 	void useProgram() const;
 
@@ -41,11 +44,14 @@ public:
 	void setNormalMatrix(const Mat3 &mat) const;
 
 	void setVec3(const std::string &uniformName, float value1, float value2, float value3) const;
+	
+	// Just added
 
 	static void loadDefaultShaders();
 
 	static const Shader *getSphereDefault();
 	static const Shader *getConnectorDefault();
+	static Shader* createFromSource(const char* vertexSource, const char* fragmentSource);
 
 	static void freeResources();
 };
