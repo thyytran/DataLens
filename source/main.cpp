@@ -32,6 +32,8 @@
 #include "graphics/SphereTemplate.h"
 #include "graphics/Tooltip.h"
 #include "graphics/Window.h"
+#include "graphics/RepresentationRenderer.h"
+#include "graphics/RepresentationType.h"
 
 // ── Biology / data ─────────────────────────────────────────────────────────
 #include "bio/Protein.h"
@@ -59,7 +61,7 @@
 
 // ── Config ────────────────────────────────────────────────────────────
 #include "Config.h"
-#include <filesystem>
+#include "filesystem"
 
 using json = nlohmann::json;
 
@@ -105,6 +107,11 @@ std::vector<std::pair<int, std::string>> chainResidues;  // {residueNum, residue
 std::vector<HoverDisplayInfo> atomToResidueMap;
 std::vector<std::string> commands;
 
+// ── Shaders for representations ─────────────────────────────────────────────
+Shader* ribbonShader = nullptr;
+Shader* surfaceShader = nullptr;
+RepresentationRenderer representationRenderer;
+
 // ── Mutation pipeline ──────────────────────────────────────────────────────
 AlphaMissenseDB      alphaMissenseDB;
 MutationSuggester* mutationSuggester = nullptr;
@@ -118,6 +125,88 @@ StructureComparison structureComparison;
 MoleculeData* mutantMoleculeData = nullptr;
 std::string mutantPdbContent = "";
 std::string mutantPdbPath = "";
+
+// -- Shader programs ---------
+
+const char* ribbonVS = R"(#version 330 core
+layout (location = 0) in vec3 aPos;
+layout (location = 1) in vec3 aNormal;
+layout (location = 2) in vec2 aTexCoord;
+layout (location = 3) in vec4 aColor;
+out vec3 FragPos;
+out vec3 Normal;
+out vec2 TexCoord;
+out vec4 Color;
+uniform mat4 u_model;
+uniform mat4 u_view;
+uniform mat4 u_projection;
+void main() {
+    vec4 worldPos = u_model * vec4(aPos, 1.0);
+    FragPos = worldPos.xyz;
+    Normal = mat3(transpose(inverse(u_model))) * aNormal;
+    TexCoord = aTexCoord;
+    Color = aColor;
+    gl_Position = u_projection * u_view * worldPos;
+})";
+
+const char* ribbonFS = R"(#version 330 core
+in vec3 FragPos;
+in vec3 Normal;
+in vec2 TexCoord;
+in vec4 Color;
+out vec4 FragColor;
+uniform vec3 u_lightDir;
+uniform vec3 u_cameraPos;
+void main() {
+    vec3 n = normalize(Normal);
+    vec3 l = normalize(u_lightDir);
+    vec3 v = normalize(u_cameraPos - FragPos);
+    if (dot(n, v) < 0.0) n = -n;
+    float diff = max(dot(n, l), 0.0);
+    vec3 h = normalize(l + v);
+    float spec = pow(max(dot(n, h), 0.0), 32.0);
+    vec3 result = (0.15 + 0.7 * diff) * Color.rgb + 0.4 * spec * vec3(1.0);
+    FragColor = vec4(result, Color.a);
+})";
+
+const char* surfaceVS = R"(#version 330 core
+layout (location = 0) in vec3 aPos;
+layout (location = 1) in vec3 aNormal;
+layout (location = 2) in vec4 aColor;
+out vec3 FragPos;
+out vec3 Normal;
+out vec4 Color;
+uniform mat4 u_model;
+uniform mat4 u_view;
+uniform mat4 u_projection;
+void main() {
+    vec4 worldPos = u_model * vec4(aPos, 1.0);
+    FragPos = worldPos.xyz;
+    Normal = mat3(transpose(inverse(u_model))) * aNormal;
+    Color = aColor;
+    gl_Position = u_projection * u_view * worldPos;
+})";
+
+const char* surfaceFS = R"(#version 330 core
+in vec3 FragPos;
+in vec3 Normal;
+in vec4 Color;
+out vec4 FragColor;
+uniform vec3 u_lightDir;
+uniform vec3 u_cameraPos;
+void main() {
+    vec3 n = normalize(Normal);
+    vec3 l = normalize(u_lightDir);
+    vec3 v = normalize(u_cameraPos - FragPos);
+    if (dot(n, v) < 0.0) n = -n;
+    float diff = max(dot(n, l), 0.0);
+    vec3 h = normalize(l + v);
+    float spec = pow(max(dot(n, h), 0.0), 16.0);
+    vec3 result = (0.2 + 0.6 * diff) * Color.rgb + 0.3 * spec * vec3(1.0);
+    FragColor = vec4(result, 0.8);
+})";
+
+// -- Shader program ends ---
 
 /*
 * The chat window shares OpenGL resources (font atlas, ImGui context) with the main
@@ -1379,8 +1468,30 @@ void renderingThread() {
 
 	// Initialize OpenGL
 	ResourceManager::initOpenGL();
+	//RepresentationRenderer representationRenderer;
+
 	// Load default shaders
 	Shader::loadDefaultShaders();
+
+	// Load representation shaders
+	representationRenderer.initialize();
+	
+	ribbonShader = new Shader(ribbonVS, ribbonFS, true);
+	surfaceShader = new Shader(surfaceVS, surfaceFS, true);
+
+	if (ribbonShader) {
+		std::cout << "Ribbon shader created, ID: " << ribbonShader->getID() << std::endl;
+	}
+	else {
+		std::cout << "Ribbon shader FAILED" << std::endl;
+	}
+
+	if (surfaceShader) {
+		std::cout << "Surface shader created, ID: " << surfaceShader->getID() << std::endl;
+	}
+	else {
+		std::cout << "Surface shader FAILED" << std::endl;
+	}
 
 	// Prepare Model
 	SphereTemplate sphereTemplate;
@@ -1992,6 +2103,9 @@ void renderingThread() {
 						Model::loadMoleculeData(moleculeData);
 						std::cout << "Model::loadMoleculeData called\n";
 
+						representationRenderer.loadMoleculeData(moleculeData);
+						representationRenderer.setRepresentationEnabled(RepresentationType::RIBBON, true);
+
 						selection.reset();
 						std::cout << "Loaded protein: " << pdbId << std::endl;
 
@@ -2167,6 +2281,28 @@ void renderingThread() {
 				selection.reset();
 
 				std::cout << "Selection cleared" << std::endl;
+			}
+
+			// In the command parsing loop, add:
+			else if (commandWords.size() == 2 && commandWords[0] == "repr") {
+				if (commandWords[1] == "ribbon") {
+					representationRenderer.toggleRepresentation(RepresentationType::RIBBON);
+				}
+				else if (commandWords[1] == "surface") {
+					representationRenderer.toggleRepresentation(RepresentationType::SURFACE);
+				}
+				else if (commandWords[1] == "ballandstick") {
+					representationRenderer.toggleRepresentation(RepresentationType::BALL_AND_STICK);
+				}
+				else if (commandWords[1] == "vdw") {
+					representationRenderer.setSurfaceType(SurfaceTemplate::SurfaceType::VAN_DER_WAALS);
+				}
+				else if (commandWords[1] == "sas") {
+					representationRenderer.setSurfaceType(SurfaceTemplate::SurfaceType::SOLVENT_ACCESSIBLE);
+				}
+				else if (commandWords[1] == "ses") {
+					representationRenderer.setSurfaceType(SurfaceTemplate::SurfaceType::SOLVENT_EXCLUDED);
+				}
 			}
 
 			// NEW COMMAND: Highlight currently selected residue
@@ -3393,6 +3529,23 @@ void renderingThread() {
 		Window::clear(0, 0, 0);
 		Model::render(Shader::getSphereDefault(), Shader::getConnectorDefault(), &window, &camera);
 
+		float identityMatrix[16] = {
+			1.0f, 0.0f, 0.0f, 0.0f,
+			0.0f, 1.0f, 0.0f, 0.0f,
+			0.0f, 0.0f, 1.0f, 0.0f,
+			0.0f, 0.0f, 0.0f, 1.0f
+			};
+
+		// std::cout << "Ribbon vertices: " << representationRenderer.getRibbonVertexCount() << std::endl;
+		// std::cout << "Surface vertices: " << representationRenderer.getSurfaceVertexCount() << std::endl;
+
+		
+		if (representationRenderer.getRibbonVertexCount() > 0 ||
+			representationRenderer.getSurfaceVertexCount() > 0) {
+			representationRenderer.render(ribbonShader, surfaceShader, &window, &camera, identityMatrix);
+			//continue;
+		}
+		
 
 		// Render ImGui draw data
 		//ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
@@ -3411,6 +3564,19 @@ void renderingThread() {
 	}
 	ImGui::SetCurrentContext(mainImGuiContext);
 
+	representationRenderer.cleanup();
+
+	
+	if (ribbonShader) {
+		delete ribbonShader;
+		ribbonShader = nullptr;
+	}
+	if (surfaceShader) {
+		delete surfaceShader;
+		surfaceShader = nullptr;
+	}
+	
+
 	// Order matters: OpenGL backend must be shut down before GLFW backend, and both
 	// before DestroyContext. Reversing this order causes a use-after-free on the
 	// ImDrawData that GLFW holds a reference to.
@@ -3420,9 +3586,11 @@ void renderingThread() {
 
 	Shader::freeResources();
 	ResourceManager::freeResources();
+
 }
 
-void buildAtomToResidueMapping(MoleculeData* moleculeData) {
+void buildAtomToResidueMapping(MoleculeData* moleculeData)
+{
 	atomIndexToDisplayInfo.clear();
 
 	// Builds a flat index from atom array position → display info (residue name,
