@@ -1,4 +1,4 @@
-#include "SurfaceTemplate.h"
+#include "graphics/SurfaceTemplate.h"
 #include <cmath>
 #include <algorithm>
 #include <limits>

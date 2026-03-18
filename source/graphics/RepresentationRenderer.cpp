@@ -1,4 +1,4 @@
-#include "RepresentationRenderer.h"
+#include "graphics/RepresentationRenderer.h"
 #include <GL/glew.h>
 #include <cmath>
 #include <algorithm>
@@ -148,68 +148,99 @@ void RepresentationRenderer::extractRibbonControlPoints(
     std::vector<RibbonControlPoint>& controlPoints
 ) {
     controlPoints.clear();
-    if (!cachedMoleculeData) return;
-    
-    // Group atoms by chain and residue, find C-alpha atoms
-    // Build a map: (chain, residueNum) -> CA atom index
+
+    if (!cachedMoleculeData) {
+        std::cout << "[DEBUG] cachedMoleculeData is NULL!" << std::endl;
+        return;
+    }
+
+    const auto& atoms = cachedMoleculeData->atoms;
+    std::cout << "[DEBUG] Total atoms: " << atoms.size() << std::endl;
+
+    // Print first 20 atom names RAW
+    std::cout << "[DEBUG] First 20 atoms:" << std::endl;
+    for (size_t i = 0; i < std::min(atoms.size(), (size_t)20); ++i) {
+        std::cout << "  [" << i << "] name='" << atoms[i].name
+            << "' res=" << atoms[i].residueName
+            << " chain=" << atoms[i].chain
+            << " resNum=" << atoms[i].residueNum << std::endl;
+    }
+
+    // Try to find ANY atom with "CA" anywhere in name
+    int foundCA = 0;
+    for (const auto& atom : atoms) {
+        if (atom.name.find("CA") != std::string::npos) {
+            foundCA++;
+            if (foundCA <= 5) {
+                std::cout << "[DEBUG] Found CA-like: '" << atom.name << "'" << std::endl;
+            }
+        }
+    }
+    std::cout << "[DEBUG] Atoms containing 'CA': " << foundCA << std::endl;
+
+    // Build maps: (chain, residueNum) -> atom index for CA, CB, N, C atoms
     std::unordered_map<std::string, size_t> caAtomMap;
     std::unordered_map<std::string, size_t> cbAtomMap;
     std::unordered_map<std::string, size_t> nAtomMap;
     std::unordered_map<std::string, size_t> cAtomMap;
-    
-    const auto& atoms = cachedMoleculeData->atoms;
-    
+
     for (size_t i = 0; i < atoms.size(); ++i) {
         const Atom& atom = atoms[i];
         std::string key = std::string(1, atom.chain) + "_" + std::to_string(atom.residueNum);
-        
-        // Trim atom name and check
+
+        // Get atom name and trim spaces
         std::string atomName = atom.name;
-        // Remove leading/trailing spaces
         while (!atomName.empty() && atomName[0] == ' ') atomName.erase(0, 1);
         while (!atomName.empty() && atomName.back() == ' ') atomName.pop_back();
-        
+
         if (atomName == "CA") {
             caAtomMap[key] = i;
-        } else if (atomName == "CB") {
+        }
+        else if (atomName == "CB") {
             cbAtomMap[key] = i;
-        } else if (atomName == "N") {
+        }
+        else if (atomName == "N") {
             nAtomMap[key] = i;
-        } else if (atomName == "C") {
+        }
+        else if (atomName == "C") {
             cAtomMap[key] = i;
         }
     }
-    
-    // Get unique residues in order (from sequence)
+
+    std::cout << "[DEBUG] CA atoms mapped: " << caAtomMap.size() << std::endl;
+    std::cout << "[DEBUG] CB atoms mapped: " << cbAtomMap.size() << std::endl;
+    std::cout << "[DEBUG] N atoms mapped: " << nAtomMap.size() << std::endl;
+    std::cout << "[DEBUG] C atoms mapped: " << cAtomMap.size() << std::endl;
+
+    // Build residue list from sequence or atoms
     std::vector<std::pair<char, int>> residueList;
-    for (const Residue& res : cachedMoleculeData->sequence) {
-        residueList.push_back({res.chain, res.residueNum});
-    }
-    
-    // If sequence is empty, build from atoms
-    if (residueList.empty()) {
-        std::set<std::pair<char, int>> seen;
-        for (const Atom& atom : atoms) {
-            auto key = std::make_pair(atom.chain, atom.residueNum);
-            if (seen.find(key) == seen.end()) {
-                seen.insert(key);
-                residueList.push_back(key);
-            }
+
+    // SKIP sequence - build directly from atoms instead
+    // The sequence residue numbers often don't match PDB atom residue numbers
+    std::cout << "[DEBUG] Building residue list from atoms..." << std::endl;
+    std::set<std::pair<char, int>> seen;
+    for (const Atom& atom : atoms) {
+        auto key = std::make_pair(atom.chain, atom.residueNum);
+        if (seen.find(key) == seen.end()) {
+            seen.insert(key);
+            residueList.push_back(key);
         }
-        // Sort by chain then residue number
-        std::sort(residueList.begin(), residueList.end());
     }
-    
+    std::sort(residueList.begin(), residueList.end());
+    std::cout << "[DEBUG] Residues from atoms: " << residueList.size() << std::endl;
+
+    // Now build control points
     char prevChain = '\0';
-    
+    int addedPoints = 0;
+
     for (const auto& [chainId, residueNum] : residueList) {
         std::string key = std::string(1, chainId) + "_" + std::to_string(residueNum);
-        
+
         auto caIt = caAtomMap.find(key);
-        if (caIt == caAtomMap.end()) continue;  // No CA atom
-        
+        if (caIt == caAtomMap.end()) continue;  // No CA atom for this residue
+
         const Atom& caAtom = atoms[caIt->second];
-        
+
         RibbonControlPoint cp;
         cp.x = caAtom.coords.getX();
         cp.y = caAtom.coords.getY();
@@ -217,7 +248,7 @@ void RepresentationRenderer::extractRibbonControlPoints(
         cp.chainId = chainId;
         cp.residueIndex = residueNum;
         cp.ssType = getSecondaryStructureForResidue(chainId, residueNum);
-        
+
         // Compute guide normal from CA->CB direction
         auto cbIt = cbAtomMap.find(key);
         if (cbIt != cbAtomMap.end()) {
@@ -225,7 +256,8 @@ void RepresentationRenderer::extractRibbonControlPoints(
             cp.nx = cbAtom.coords.getX() - cp.x;
             cp.ny = cbAtom.coords.getY() - cp.y;
             cp.nz = cbAtom.coords.getZ() - cp.z;
-        } else {
+        }
+        else {
             // For glycine (no CB), use N->C perpendicular
             auto nIt = nAtomMap.find(key);
             auto cIt = cAtomMap.find(key);
@@ -235,37 +267,35 @@ void RepresentationRenderer::extractRibbonControlPoints(
                 float dx = cAtom.coords.getX() - nAtom.coords.getX();
                 float dy = cAtom.coords.getY() - nAtom.coords.getY();
                 float dz = cAtom.coords.getZ() - nAtom.coords.getZ();
-                // Cross with up vector for perpendicular
                 cp.nx = -dy;
                 cp.ny = dx;
                 cp.nz = 0.0f;
-            } else {
+            }
+            else {
                 cp.nx = 0.0f;
                 cp.ny = 1.0f;
                 cp.nz = 0.0f;
             }
         }
-        
+
         // Normalize
-        float len = std::sqrt(cp.nx*cp.nx + cp.ny*cp.ny + cp.nz*cp.nz);
+        float len = std::sqrt(cp.nx * cp.nx + cp.ny * cp.ny + cp.nz * cp.nz);
         if (len > 1e-6f) {
             cp.nx /= len;
             cp.ny /= len;
             cp.nz /= len;
         }
-        
+
         // Set color based on secondary structure
         getSSColor(cp.ssType, cp.colorR, cp.colorG, cp.colorB);
         cp.colorA = 1.0f;
-        
-        // Mark chain breaks (for the ribbon generator to handle)
-        if (chainId != prevChain && !controlPoints.empty()) {
-            // Add a marker or just let the ribbon generator detect chain breaks
-        }
+
         prevChain = chainId;
-        
         controlPoints.push_back(cp);
+        addedPoints++;
     }
+
+    std::cout << "[DEBUG] Final control points: " << addedPoints << std::endl;
 }
 
 void RepresentationRenderer::extractSurfaceAtoms(std::vector<SurfaceAtom>& surfaceAtoms) {
@@ -382,29 +412,54 @@ void RepresentationRenderer::uploadSurfaceBuffers() {
 }
 
 void RepresentationRenderer::loadMoleculeData(MoleculeData* moleculeData) {
+    std::cout << "[REPR] loadMoleculeData called" << std::endl;
+
     cachedMoleculeData = moleculeData;
     ribbonBuffersValid = false;
     surfaceBuffersValid = false;
-    
-    if (!moleculeData) return;
-    
-    // Generate representations
+
+    if (!moleculeData) {
+        std::cout << "[REPR] moleculeData is null, returning" << std::endl;
+        return;
+    }
+
+    std::cout << "[REPR] Atom count: " << moleculeData->atoms.size() << std::endl;
+    std::cout << "[REPR] Starting ribbon generation..." << std::endl;
+
     regenerateRibbon();
+
+    std::cout << "[REPR] Ribbon complete!" << std::endl;
+
     regenerateSurface();
 }
 
 void RepresentationRenderer::regenerateRibbon() {
+    std::cout << "[REPR] extractRibbonControlPoints..." << std::endl;
+
     std::vector<RibbonControlPoint> controlPoints;
     extractRibbonControlPoints(controlPoints);
+
+    std::cout << "[REPR] Control points: " << controlPoints.size() << std::endl;
+    std::cout << "[REPR] generateRibbon..." << std::endl;
+
     ribbonTemplate.generateRibbon(controlPoints);
+
+    std::cout << "[REPR] uploadRibbonBuffers..." << std::endl;
+
     uploadRibbonBuffers();
+
+    std::cout << "[REPR] regenerateRibbon done!" << std::endl;
 }
 
 void RepresentationRenderer::regenerateSurface() {
+    std::cout << "[REPR] start regenerateSurface..." << std::endl;
+
     std::vector<SurfaceAtom> surfaceAtoms;
     extractSurfaceAtoms(surfaceAtoms);
     surfaceTemplate.generateSurface(surfaceAtoms, surfaceType);
     uploadSurfaceBuffers();
+    std::cout << "[REPR] regenerateSurface done!" << std::endl;
+
 }
 
 void RepresentationRenderer::setRepresentationEnabled(RepresentationType type, bool enabled) {
