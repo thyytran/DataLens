@@ -32,6 +32,8 @@
 #include "graphics/SphereTemplate.h"
 #include "graphics/Tooltip.h"
 #include "graphics/Window.h"
+#include "graphics/RepresentationRenderer.h"
+#include "graphics/RepresentationType.h"
 
 // ── Biology / data ─────────────────────────────────────────────────────────
 #include "bio/Protein.h"
@@ -56,10 +58,13 @@
 #include "ResourceManager.h"
 #include "Selection.h"
 #include "../include/mutation/MutationState.h"
+#include "WelcomeModal.h" 
+#include "PerformanceLogger.h"
 
 // ── Config ────────────────────────────────────────────────────────────
 #include "Config.h"
-#include <filesystem>
+#include "filesystem"
+#include <assistant/VariantDatabaseFetcher.h>
 
 using json = nlohmann::json;
 
@@ -79,6 +84,15 @@ std::string apiKey = config.aiApiKey;
 
 // ── Application control ────────────────────────────────────────────────────
 bool shouldExit = false;
+// static WelcomeModal welcome;
+PerformanceLogger g_perfLog;
+
+double g_fps = 0.0;
+double g_frameTimeMs = 0.0;
+std::chrono::steady_clock::time_point g_lastFrameTime = std::chrono::steady_clock::now();
+
+double g_renderMs = 0.0;
+double g_renderFps = 0.0;
 
 // ── Window & ImGui shared state ────────────────────────────────────────────
 GLFWwindow* mainWindowPtr = nullptr;
@@ -93,6 +107,13 @@ char chatInputBuffer[512] = "";
 bool chatProcessing = false;
 std::mutex chatMutex;
 
+float chatWindowHeight = 736.0f;           // Adjustable chat panel height
+bool chatAutoScroll = true;                // Auto-scroll toggle
+size_t lastChatSize = 0;                   // Tracks message count for smart scroll
+std::string lastAssistantResponse = "";    // Stores last AI response for copy
+#include "assistant/DatalensMemory.h"
+DataLensMemory* datalensMemory = nullptr;  // Persistent storage pointer
+
 // ── Molecule & structure ───────────────────────────────────────────────────
 MoleculeData* currentMolData = nullptr;
 PDBStructureData currentStructureData;
@@ -105,6 +126,11 @@ std::vector<std::pair<int, std::string>> chainResidues;  // {residueNum, residue
 std::vector<HoverDisplayInfo> atomToResidueMap;
 std::vector<std::string> commands;
 
+// ── Shaders for representations ─────────────────────────────────────────────
+Shader* ribbonShader = nullptr;
+Shader* surfaceShader = nullptr;
+RepresentationRenderer representationRenderer;
+
 // ── Mutation pipeline ──────────────────────────────────────────────────────
 AlphaMissenseDB      alphaMissenseDB;
 MutationSuggester* mutationSuggester = nullptr;
@@ -112,12 +138,132 @@ MutationAnalyzer* mutationAnalyzer = nullptr;
 std::atomic<bool>    mutationAnalysisRunning(false);
 ManualMutState manualMut;
 MutationPanel mutationPanel;
+bool triggerMutationAnalysis = false;
+std::string uniprotVariantSummary;
+std::mutex uniprotDataMutex;
+
+// ── UniProt variant fetch state ──────────────────────────────────────
+bool fetchUniProtVariants = false;
+json uniprotVariantData;
+std::atomic<bool> uniprotFetchRunning(false);
 
 // ── Comparison odule ──────────────────────────────────────────────────────
 StructureComparison structureComparison;
 MoleculeData* mutantMoleculeData = nullptr;
 std::string mutantPdbContent = "";
 std::string mutantPdbPath = "";
+
+// -- Shader programs ---------
+
+const char* ribbonVS = R"(#version 330 core
+layout (location = 0) in vec3 aPos;
+layout (location = 1) in vec3 aNormal;
+layout (location = 2) in vec2 aTexCoord;
+layout (location = 3) in vec4 aColor;
+out vec3 FragPos;
+out vec3 Normal;
+out vec2 TexCoord;
+out vec4 Color;
+uniform mat4 u_model;
+uniform mat4 u_view;
+uniform mat4 u_projection;
+void main() {
+    vec4 worldPos = u_model * vec4(aPos, 1.0);
+    FragPos = worldPos.xyz;
+    Normal = mat3(transpose(inverse(u_model))) * aNormal;
+    TexCoord = aTexCoord;
+    Color = aColor;
+    gl_Position = u_projection * u_view * worldPos;
+})";
+
+const char* ribbonFS = R"(#version 330 core
+in vec3 FragPos;
+in vec3 Normal;
+in vec2 TexCoord;
+in vec4 Color;
+out vec4 FragColor;
+uniform vec3 u_lightDir;
+uniform vec3 u_cameraPos;
+void main() {
+    vec3 n = normalize(Normal);
+    vec3 l = normalize(u_lightDir);
+    vec3 v = normalize(u_cameraPos - FragPos);
+    if (dot(n, v) < 0.0) n = -n;
+    float diff = max(dot(n, l), 0.0);
+    vec3 h = normalize(l + v);
+    float spec = pow(max(dot(n, h), 0.0), 32.0);
+    vec3 result = (0.15 + 0.7 * diff) * Color.rgb + 0.4 * spec * vec3(1.0);
+    FragColor = vec4(result, Color.a);
+})";
+
+const char* surfaceVS = R"(#version 330 core
+layout (location = 0) in vec3 aPos;
+layout (location = 1) in vec3 aNormal;
+layout (location = 2) in vec4 aColor;
+out vec3 FragPos;
+out vec3 Normal;
+out vec4 Color;
+uniform mat4 u_model;
+uniform mat4 u_view;
+uniform mat4 u_projection;
+void main() {
+    vec4 worldPos = u_model * vec4(aPos, 1.0);
+    FragPos = worldPos.xyz;
+    Normal = mat3(transpose(inverse(u_model))) * aNormal;
+    Color = aColor;
+    gl_Position = u_projection * u_view * worldPos;
+})";
+
+const char* surfaceFS = R"(#version 330 core
+in vec3 FragPos;
+in vec3 Normal;
+in vec4 Color;
+out vec4 FragColor;
+uniform vec3 u_lightDir;
+uniform vec3 u_cameraPos;
+void main() {
+    vec3 n = normalize(Normal);
+    vec3 l = normalize(u_lightDir);
+    vec3 v = normalize(u_cameraPos - FragPos);
+    if (dot(n, v) < 0.0) n = -n;
+    float diff = max(dot(n, l), 0.0);
+    vec3 h = normalize(l + v);
+    float spec = pow(max(dot(n, h), 0.0), 16.0);
+    vec3 result = (0.2 + 0.6 * diff) * Color.rgb + 0.3 * spec * vec3(1.0);
+    FragColor = vec4(result, 0.8);
+})";
+
+// -- Shader program ends ---
+
+void renderFPSOverlay() {
+	auto now = std::chrono::steady_clock::now();
+	g_frameTimeMs = std::chrono::duration<double, std::milli>(now - g_lastFrameTime).count();
+	g_lastFrameTime = now;
+	if (g_frameTimeMs > 0) g_fps = g_fps * 0.95 + (1000.0 / g_frameTimeMs) * 0.05;
+
+	ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowBgAlpha(0.6f);
+	if (ImGui::Begin("##FPS", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoNav)) {
+		ImVec4 col = (g_fps >= 55) ? ImVec4(0.2f, 1, 0.2f, 1) : (g_fps >= 30) ? ImVec4(1, 1, 0.2f, 1) : ImVec4(1, 0.3f, 0.3f, 1);
+		ImGui::TextColored(col, "%.1f FPS", g_fps);
+		ImGui::TextDisabled("%.2f ms", g_frameTimeMs);
+	}
+	ImGui::End();
+}
+
+void renderMoleculeStats() {
+	ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowBgAlpha(0.7f);
+	if (ImGui::Begin("##RenderStats", nullptr,
+		ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoNav)) {
+		ImVec4 col = (g_renderFps >= 55) ? ImVec4(0.2f, 1, 0.2f, 1) :
+			(g_renderFps >= 30) ? ImVec4(1, 1, 0.2f, 1) : ImVec4(1, 0.3f, 0.3f, 1);
+		ImGui::TextColored(col, "%.1f FPS", g_renderFps);
+		ImGui::TextDisabled("Render: %.2f ms", g_renderMs);
+		if (currentMolData) ImGui::TextDisabled("Atoms: %zu", currentMolData->atoms.size());
+	}
+	ImGui::End();
+}
 
 /*
 * The chat window shares OpenGL resources (font atlas, ImGui context) with the main
@@ -144,9 +290,30 @@ void chatWindowThread() {
 	chatWindowPtr.reset();
 }
 
+void addChatMessage_0(const std::string& sender, const std::string& message) {
+	std::lock_guard<std::mutex> lock(chatMutex);
+	chatHistory.push_back(sender + ": " + message);
+}
+
 void addChatMessage(const std::string& sender, const std::string& message) {
 	std::lock_guard<std::mutex> lock(chatMutex);
 	chatHistory.push_back(sender + ": " + message);
+
+	// Track last assistant response for copy functionality
+	if (sender == "Assistant") {
+		lastAssistantResponse = message;
+	}
+
+	// Persist to disk via DatalensMemory
+	if (datalensMemory != nullptr) {
+		std::string role = (sender == "You") ? "user" :
+			(sender == "Assistant") ? "assistant" : "system";
+		datalensMemory->addChat(role, message, currentPdbId);
+		datalensMemory->save();
+	}
+
+	// Trigger auto-scroll
+	chatAutoScroll = true;
 }
 
 std::string getPrimaryUniProtID(const std::string& pdbID, char chain) {
@@ -527,13 +694,19 @@ void runMutationAnalysis(
 
 	std::cout << "[2/3] Fetching AlphaMissense predictions...\n";
 
+	g_perfLog.beginTimer(PerformanceLogger::MetricType::API_ALPHAMISSENSE_QUERY,
+		uniprotId + "_pos" + std::to_string(uniprotPosition));
+
 	if (!http.get(amUrl)) {
+		g_perfLog.endTimer(PerformanceLogger::MetricType::API_ALPHAMISSENSE_QUERY);
 		std::cerr << "\n[!] Could not reach the AlphaMissense service.\n"
 			<< " Make sure the backend is running at " << BACKEND_URL << "\n"
 			<< " and the AlphaMissense database is loaded (216M+ variants).\n\n";
 		mutationAnalysisRunning = false;
 		return;
 	}
+	g_perfLog.endTimer(PerformanceLogger::MetricType::API_ALPHAMISSENSE_QUERY);
+
 
 	try {
 		auto amJson = json::parse(http.getResponse());
@@ -610,6 +783,8 @@ void runMutationAnalysis(
 			};
 
 			std::string analyzeUrl = BACKEND_URL + "/api/analyze_mutation";
+			g_perfLog.beginTimer(PerformanceLogger::MetricType::API_FOLDX_ANALYSIS,
+				topMutAA);
 
 			if (!http.post(analyzeUrl, requestBody.dump())) {
 				std::cout << "\n[i] Full structural analysis is unavailable.\n"
@@ -618,6 +793,8 @@ void runMutationAnalysis(
 			}
 			else {
 				try {
+
+
 					auto reportJson = json::parse(http.getResponse());
 
 					if (reportJson.contains("detail")) {
@@ -685,6 +862,9 @@ void runMutationAnalysis(
 							!reportJson["mutant_pdb"].get<std::string>().empty())
 						{
 							mutantPdbContent = reportJson["mutant_pdb"].get<std::string>();
+
+							g_perfLog.endTimer(PerformanceLogger::MetricType::API_FOLDX_ANALYSIS);
+
 							commands.push_back("loadmutant");
 							std::cout << "\n[COMPARISON] Mutant PDB received — queued for comparison.\n";
 						}
@@ -729,6 +909,7 @@ void fetchAllMutationsForPDB(
 	const std::string& pdbId,
 	const std::map<char, std::vector<int>>& chainResidues  // chain -> pdb residue list
 ) {
+	g_perfLog.beginTimer(PerformanceLogger::MetricType::API_LANDSCAPE_LOAD, pdbId);
 	mutationPanel.loading = true;
 	mutationPanel.loadedCount = 0;
 	mutationPanel.totalCount = 0;
@@ -821,7 +1002,12 @@ void fetchAllMutationsForPDB(
 			summary.pdbResidueNum = pdbRes;
 			summary.uniprotPos = uniprotPos;
 
+			g_perfLog.beginTimer(PerformanceLogger::MetricType::API_ALPHAMISSENSE_QUERY,
+				chainInfo.uniprotId + "_pos" + std::to_string(uniprotPos));
+
 			if (http.get(posUrl)) {
+				g_perfLog.endTimer(PerformanceLogger::MetricType::API_ALPHAMISSENSE_QUERY);
+
 				try {
 					auto j = json::parse(http.getResponse());
 					if (!j.contains("detail") && j.contains("predictions")) {
@@ -860,6 +1046,8 @@ void fetchAllMutationsForPDB(
 		mutationPanel.showWindow = true;
 	}
 	mutationPanel.loading = false;
+	g_perfLog.endTimer(PerformanceLogger::MetricType::API_LANDSCAPE_LOAD);
+
 }
 
 
@@ -873,6 +1061,22 @@ void renderVariantSelector(
 	const json& allChains,   // from /api/pdb/{id}/all-residues
 	ManualMutState& manualMut
 ) {
+
+	static bool wasEmpty = true;
+	bool isEmpty = variantData.empty();
+
+	// Track when panel transitions from empty to loaded
+	if (wasEmpty && !isEmpty) {
+		g_perfLog.recordSample(
+			PerformanceLogger::MetricType::UI_VARIANT_SELECTOR,
+			0.0,  // We record the moment, timing comes from landscape loading
+			currentPdbId,
+			0,
+			(int)variantData.size()
+		);
+	}
+	wasEmpty = isEmpty;
+
 	ImGui::Begin("Variant Selector");
 
 	float totalHeight = ImGui::GetContentRegionAvail().y;
@@ -1090,13 +1294,37 @@ void renderVariantSelector(
 
 			if (ImGui::Button("Run FoldX ->##manual", ImVec2(-1, 0)))
 				manualMut.runManual = true;
+
+			ImGui::Spacing();
+
+			// ── Fetch UniProt Variants Button ──────────────────────────
+			std::string selUniprotId = selChain.value("uniprot_id", "");
+			if (!selUniprotId.empty() && selUniprotId != "?") {
+				if (uniprotFetchRunning) {
+					ImGui::BeginDisabled();
+					ImGui::Button("Fetching...", ImVec2(-1, 0));
+					ImGui::EndDisabled();
+				}
+				else {
+					std::string btnLabel = "Fetch Variant Specs @ pos " +
+						std::to_string(manualMut.position) + " (" + selUniprotId + ") from Uniprot";
+					if (ImGui::Button(btnLabel.c_str(), ImVec2(-1, 0))) {
+						manualMut.uniprotIdToFetch = selUniprotId;
+						manualMut.positionToFetch = manualMut.position;
+						manualMut.fetchUniProtVariants = true;
+					}
+				}
+			}
+			else {
+				ImGui::TextDisabled("No UniProt ID for this chain");
+			}
 		}
 	}
 
 	ImGui::End();
 }
 
-void applyMutationHighlight(
+void applyMutationHighlight1(
 	MoleculeData* wtMol,
 	MoleculeData* mutMol,
 	const std::string& chainId,
@@ -1132,7 +1360,7 @@ void applyMutationHighlight(
 		// If mutant is SMALLER (like ALA vs LYS), make it larger so visible
 		Color magenta = Color::fromByte(255, 0, 255);
 		Model::setAtomColor(&magenta, &mutSel);
-		float radius = (mutAtomCount < wtAtomCount) ? 0.45f : 0.30f;
+		float radius = (mutAtomCount < wtAtomCount) ? 0.13f : 0.10f;
 		Model::setAtomRadius(radius, &mutSel);
 	}
 	else {
@@ -1140,13 +1368,151 @@ void applyMutationHighlight(
 		// If WT is LARGER (like LYS vs ALA), make sidechain prominent
 		Color orange = Color::fromByte(255, 140, 0);
 		Model::setAtomColor(&orange, &mutSel);
-		float radius = (wtAtomCount > mutAtomCount) ? 0.40f : 0.30f;
+		float radius = (wtAtomCount > mutAtomCount) ? 0.15f : 0.13f;
 		Model::setAtomRadius(radius, &mutSel);
 	}
 
 	std::cout << "[COMPARE] " << wtResName << "(" << wtAtomCount << " atoms)"
 		<< " -> " << mutResName << "(" << mutAtomCount << " atoms)"
 		<< " at pos " << position << " chain " << chainId << "\n";
+}
+
+void applyMutationHighlight0(
+	MoleculeData* wtMol,
+	MoleculeData* mutMol,
+	const std::string& chainId,
+	int position,
+	bool showingMutant,
+	const MutationFocusData& focus
+) {
+	if (!wtMol || !mutMol) return;
+	char chain = chainId.empty() ? 'A' : chainId[0];
+
+	Selection resSel;
+	resSel.residue = position;
+	resSel.chain = chain;
+	Color neutral = Color::fromByte(130, 130, 130);
+	Model::setAtomColor(&neutral, &resSel);
+	Model::setAtomRadius(SphereTemplate::DEFAULT_RADIUS, &resSel);
+
+	MoleculeData* mol = showingMutant ? mutMol : wtMol;
+
+	Color sharedCol = Color::fromByte(120, 160, 255);  // blue
+	Color lostCol = Color::fromByte(180, 60, 0);  // dark orange ← changed
+	Color gainedCol = Color::fromByte(255, 0, 255);  // magenta
+
+	// Apply lost FIRST, then shared overwrites any conflicts
+	for (const auto& name : focus.lostAtoms)
+		for (const auto& a : wtMol->atoms)
+			if (a.residueNum == position && a.chain == chain && a.name == name) {
+				Selection es; es.residue = position; es.chain = chain;
+				es.element = a.element;
+				Model::setAtomColor(&lostCol, &es);
+				Model::setAtomRadius(0.1f, &es);
+				break;
+			}
+
+	// Shared runs AFTER lost — wins any element conflict
+	for (const auto& name : focus.sharedAtoms)
+		for (const auto& a : mol->atoms)
+			if (a.residueNum == position && a.chain == chain && a.name == name) {
+				Selection es; es.residue = position; es.chain = chain;
+				es.element = a.element;
+				Model::setAtomColor(&sharedCol, &es);
+				Model::setAtomRadius(0.1f, &es);
+				break;
+			}
+
+	// Gained last
+	for (const auto& name : focus.gainedAtoms)
+		for (const auto& a : mutMol->atoms)
+			if (a.residueNum == position && a.chain == chain && a.name == name) {
+				Selection es; es.residue = position; es.chain = chain;
+				es.element = a.element;
+				Model::setAtomColor(&gainedCol, &es);
+				Model::setAtomRadius(0.1f, &es);
+				break;
+			}
+}
+
+void applyMutationHighlight(
+	MoleculeData* wtMol,
+	MoleculeData* mutMol,
+	const std::string& chainId,
+	int position,
+	bool showingMutant,
+	const MutationFocusData& focus
+) {
+	if (!wtMol || !mutMol) return;
+	char chain = chainId.empty() ? 'A' : chainId[0];
+
+	MoleculeData* mol = showingMutant ? mutMol : wtMol;
+
+	// ── Dim everything except the mutation site ───────────────────────────
+	if (showingMutant) {
+		Color dim = Color::fromByte(30, 30, 30);  // near black — adjust to taste
+
+		// Collect unique residues to avoid redundant setAtomColor calls
+		std::set<std::pair<int, char>> seen;
+		for (const auto& a : mol->atoms) {
+			if (a.residueNum == position && a.chain == chain) continue; // skip mutation site
+			auto key = std::make_pair(a.residueNum, a.chain);
+			if (seen.insert(key).second) {
+				Selection dimSel;
+				dimSel.residue = a.residueNum;
+				dimSel.chain = a.chain;
+				Model::setAtomColor(&dim, &dimSel);
+			}
+		}
+	}
+
+	// ── Reset mutation site to neutral ────────────────────────────────────
+	Selection resSel;
+	resSel.residue = position;
+	resSel.chain = chain;
+	Color neutral = Color::fromByte(130, 130, 130);
+	Model::setAtomColor(&neutral, &resSel);
+	Model::setAtomRadius(SphereTemplate::DEFAULT_RADIUS, &resSel);
+
+	Color sharedCol = Color::fromByte(120, 160, 255);  // blue
+	Color lostCol = Color::fromByte(180, 60, 0);  // dark orange
+	Color gainedCol = Color::fromByte(255, 0, 255);  // magenta
+
+	// Lost first, shared overwrites conflicts
+	for (const auto& name : focus.lostAtoms)
+		for (const auto& a : wtMol->atoms)
+			if (a.residueNum == position && a.chain == chain && a.name == name) {
+				Selection es; es.residue = position; es.chain = chain;
+				es.element = a.element;
+				Model::setAtomColor(&lostCol, &es);
+				Model::setAtomRadius(0.1f, &es);
+				break;
+			}
+
+	for (const auto& name : focus.sharedAtoms)
+		for (const auto& a : mol->atoms)
+			if (a.residueNum == position && a.chain == chain && a.name == name) {
+				Selection es; es.residue = position; es.chain = chain;
+				es.element = a.element;
+				Model::setAtomColor(&sharedCol, &es);
+				Model::setAtomRadius(0.1f, &es);
+				break;
+			}
+
+	for (const auto& name : focus.gainedAtoms)
+		for (const auto& a : mutMol->atoms)
+			if (a.residueNum == position && a.chain == chain && a.name == name) {
+				Selection es; es.residue = position; es.chain = chain;
+				es.element = a.element;
+				Model::setAtomColor(&gainedCol, &es);
+				Model::setAtomRadius(0.1f, &es);
+				break;
+			}
+
+	// ── Restore full brightness when switching back to WT ─────────────────
+	if (!showingMutant) {
+		Model::colorAtomsDefault(&resSel);  // handled by caller restoring WT mol
+	}
 }
 
 void renderMutationComparison(
@@ -1245,6 +1611,9 @@ void renderMutationComparison(
 void renderMutationFocusPanel(MutationFocusData& f) {
 	if (!f.show) return;
 
+	g_perfLog.beginTimer(PerformanceLogger::MetricType::UI_MUTATION_FOCUS,
+		f.variantId);
+
 	ImGui::SetNextWindowPos(ImVec2(10.0f, 230.0f), ImGuiCond_FirstUseEver);
 	ImGui::SetNextWindowSize(ImVec2(280.0f, 320.0f), ImGuiCond_FirstUseEver);
 	ImGui::Begin("Mutation Focus", &f.show);
@@ -1341,6 +1710,8 @@ void renderMutationFocusPanel(MutationFocusData& f) {
 		ImGui::TextWrapped("Glycine introduced:\nincreases local flexibility");
 	}
 
+	g_perfLog.endTimer(PerformanceLogger::MetricType::UI_MUTATION_FOCUS);
+
 	ImGui::End();
 }
 
@@ -1368,8 +1739,28 @@ void renderingThread() {
 	}
 
 	// Create main visualization window
-	Window window("Datalens - Protein Visualization", 2000, 1330, false);
+	Window window("Datalens - Protein Visualization", 2000, 1300, false);
+	DataLensMemory memory("memory.json");
+	memory.load();
+	datalensMemory = &memory;
+	
+
+	// Load persisted chat history from previous sessions
 	mainWindowPtr = window.get(); // Store reference for chat window
+
+	{
+		std::lock_guard<std::mutex> lk(chatMutex);
+		for (const auto& entry : datalensMemory->getChats()) {
+			std::string prefix = (entry.role == "user") ? "You: " :
+				(entry.role == "assistant") ? "Assistant: " : "System: ";
+			chatHistory.push_back(prefix + entry.content);
+			if (entry.role == "assistant") {
+				lastAssistantResponse = entry.content;
+			}
+		}
+		lastChatSize = chatHistory.size();
+	} 
+	// === END MEMORY INITIALIZATION ===
 
 	// Initialize GLEW
 	if (!ResourceManager::initGLEW()) {
@@ -1379,8 +1770,30 @@ void renderingThread() {
 
 	// Initialize OpenGL
 	ResourceManager::initOpenGL();
+	//RepresentationRenderer representationRenderer;
+
 	// Load default shaders
 	Shader::loadDefaultShaders();
+
+	// Load representation shaders
+	//representationRenderer.initialize();
+	
+	ribbonShader = new Shader(ribbonVS, ribbonFS, true);
+	surfaceShader = new Shader(surfaceVS, surfaceFS, true);
+
+	if (ribbonShader) {
+		std::cout << "Ribbon shader created, ID: " << ribbonShader->getID() << std::endl;
+	}
+	else {
+		std::cout << "Ribbon shader FAILED" << std::endl;
+	}
+
+	if (surfaceShader) {
+		std::cout << "Surface shader created, ID: " << surfaceShader->getID() << std::endl;
+	}
+	else {
+		std::cout << "Surface shader FAILED" << std::endl;
+	}
 
 	// Prepare Model
 	SphereTemplate sphereTemplate;
@@ -1405,6 +1818,40 @@ void renderingThread() {
 	io.DisplaySize = ImVec2((float)window.getWidth(), (float)window.getHeight());
 
 	ImGui::StyleColorsDark();
+
+	// ── Custom font ───────────────────────────────────────────────────────────
+	// Build a custom range: default Latin + Greek block (Δ = 0x0394)
+	ImVector<ImWchar> ranges;
+	ImFontGlyphRangesBuilder builder;
+	builder.AddRanges(io.Fonts->GetGlyphRangesDefault()); // Basic Latin
+	builder.AddText("ΔΔG αβγδεζ");  // explicitly add every Greek char you need
+	builder.BuildRanges(&ranges);    // ranges must stay alive until Build() is called
+	 
+	// Place your .ttf file next to the executable (x64/Debug/ or x64/Release/)
+	// Size 16.0f is comfortable for UI panels; raise to 17-18 for denser screens.
+	ImFontConfig fontCfg;
+	fontCfg.OversampleH = 2;          // horizontal oversampling for sharper glyphs
+	fontCfg.OversampleV = 2;
+	fontCfg.PixelSnapH = true;       // snap to pixel grid — reduces blur on LCD
+
+	io.Fonts->Clear();                 // discard ImGui's built-in default font
+
+	ImFont* mainFont = io.Fonts->AddFontFromFileTTF(
+		"fonts/RobotoMono-Regular.ttf",    // ← path relative to the executable
+		17.0f,                        // ← size in pixels
+		&fontCfg,
+		ranges.Data
+	);
+
+	if (!mainFont) {
+		// Font file missing — fall back to ImGui's built-in Proggy Clean
+		std::cerr << "WelcomeModal: font not found, using default\n";
+		io.Fonts->AddFontDefault();
+	}
+
+	io.Fonts->Build();
+	io.FontDefault = mainFont;
+	// ── End custom font ───────────────────────────────────────────────────────
 
 	// Initialize platform/renderer backends IN CORRECT ORDER
 	ImGui_ImplGlfw_InitForOpenGL(window.get(), true);
@@ -1467,6 +1914,7 @@ void renderingThread() {
 	// std::cout << "Resetting frame state before main loop..." << std::endl;
 	glfwMakeContextCurrent(mainWindowPtr);
 	ImGui::SetCurrentContext(mainImGuiContext);
+	WelcomeModal welcome;
 
 
 	// Main rendering loop
@@ -1491,6 +1939,21 @@ void renderingThread() {
 
 			std::cout << "Selection cleared (ESC)" << std::endl;
 		}
+
+		// std::cout << "[DEBUG] About to check F12\n";
+		
+		/*
+		// ─── F12: Export Performance Data ────────────────────────────────────
+		static bool prevF12Pressed = false;
+		bool f12Pressed = Input::keyPressed(&window, Key::F12);
+		if (f12Pressed && !prevF12Pressed) {
+			std::cout << "[Perf] Sample count: " << g_perfLog.sampleCount() << "\n";  
+			g_perfLog.exportAll("datalens_perf");
+			std::cout << "[Perf] Exported to datalens_perf_raw.csv and datalens_perf_summary.csv\n";
+		}
+		prevF12Pressed = f12Pressed;
+		// ─────────────────────────────────────────────────────────────────────
+		*/
 
 		camera.zoom((float)Input::getMouseScrollOffsetY());
 
@@ -1534,7 +1997,8 @@ void renderingThread() {
 			bool dKeyPressed = Input::keyPressed(&window, Key::D);
 
 			// A - Mutation Analysis
-			if (aKeyPressed && !prevAKeyPressed) {
+			if ((aKeyPressed && !prevAKeyPressed) || triggerMutationAnalysis) {
+				triggerMutationAnalysis = false;
 				if (selectedAtomIndex && moleculeData) {
 					const Atom& atom = moleculeData->atoms[*selectedAtomIndex];
 
@@ -1660,6 +2124,7 @@ void renderingThread() {
 									if (indicator == '!') pathCount++;
 									else if (indicator == '~') ambCount++;
 									else  benCount++;
+									std::cerr << "[VARIANTDATA] uniprotId=" << uniprotId << " capChain=" << capChain << "\n";
 
 									variantData.push_back({
 										{"variant_id",  variant},
@@ -1668,9 +2133,13 @@ void renderingThread() {
 										{"alt_aa", altAA},
 										{"pathogenicity_score", score},
 										{"classification", amClass},
+										{"uniprot_id", uniprotId},   // e.g. "P38398"
+										{"chain_id",   capChain},     // e.g. "A"
 										{ "foldx_ready", true }   // A-key only fires for mapped chains
 
 										});
+
+
 									variantPositions.insert(uniprotPos);
 								}
 
@@ -1859,11 +2328,14 @@ void renderingThread() {
 						url = commandWords[2];
 						std::cout << "\nLoading from URL: " << url << "\n";
 					}
-
+					g_perfLog.beginTimer(PerformanceLogger::MetricType::LOAD_PDB_FETCH, commandWords[2]);
+					
 					moleculeData = new PDBFile(url);
 					if (moleculeData) {
 						std::cout << "PDBFile created successfully\n";
 					}
+
+					g_perfLog.endTimer(PerformanceLogger::MetricType::LOAD_PDB_FETCH);
 
 					// Fetch both PDB structure and mutation data
 					bool success = FetchPDB::fetchComplete(
@@ -1992,6 +2464,9 @@ void renderingThread() {
 						Model::loadMoleculeData(moleculeData);
 						std::cout << "Model::loadMoleculeData called\n";
 
+						//representationRenderer.loadMoleculeData(moleculeData);
+						//representationRenderer.setRepresentationEnabled(RepresentationType::RIBBON, true);
+
 						selection.reset();
 						std::cout << "Loaded protein: " << pdbId << std::endl;
 
@@ -2045,26 +2520,60 @@ void renderingThread() {
 			}
 
 			else if (commandWords.size() >= 2 && commandWords[0] == "select") {
+				std::vector<std::string> selectionQuery;
+				
 				if (!moleculeData) {
 					std::cerr << "\n[!] No protein structure is loaded.\n"
 						<< " Load one first with: fetch pdb <pdb_id>\n\n";
 				}
 				else {
-					// Parse selection using existing selection syntax
+					// Clear any existing selection exactly as the click path does
+					if (selectedAtomIndex) {
+						const Atom& prevAtom = moleculeData->atoms[*selectedAtomIndex];
+						Selection clearSel;
+						clearSel.residue = prevAtom.residueNum;
+						clearSel.chain = prevAtom.chain;
+						Model::colorAtomsDefault(&clearSel);
+						Model::setAtomRadius(SphereTemplate::DEFAULT_RADIUS, &clearSel);
+					}
 					std::vector<std::string> selectionQuery(
-						commandWords.begin() + 1,  // Skip "select"
+						// Parse the selection query (e.g. "select r=42 c=A")
+						commandWords.begin() + 1,
 						commandWords.end()
 					);
-
 					selection.parseQuery(selectionQuery);
 
-					// Highlight the residue
-					Color highlightColor = Color::fromName("white");
-					Model::setAtomRadius(0.4f, &selection);
-					Model::setAtomColor(&highlightColor, &selection);
+					// Find the first atom in moleculeData that matches the new selection —
+					// we need an atom index so downstream systems (M-key menu, A-key analysis,
+					// ESC clear, context menu) all behave identically to a mouse click.
+					selectedAtomIndex = std::nullopt;
+					for (size_t idx = 0; idx < moleculeData->atoms.size(); ++idx) {
+						if (selection.isMatch(&moleculeData->atoms[idx])) {
+							selectedAtomIndex = idx;
+							break;
+						}
+					}
 
-					std::cout << "Selection applied and highlighted" << std::endl;
-					selection.print();  // Show what was selected
+					if (selectedAtomIndex) {
+						const Atom& atom = moleculeData->atoms[*selectedAtomIndex];
+
+						// Apply the same orange highlight + radius the click path uses
+						Color selectColor = Color::fromByte(255, 100, 0);
+						Model::setAtomRadius(0.2f, &selection);
+						Model::setAtomColor(&selectColor, &selection);
+
+						std::cout << "\n========== RESIDUE SELECTED ==========" << std::endl;
+						std::cout << "Residue:  " << atom.residueName
+							<< " " << atom.residueNum << std::endl;
+						std::cout << "Chain: " << atom.chain << std::endl;
+						std::cout << "=========================================\n" << std::endl;
+						selection.print();
+					}
+					else {
+						std::cerr << "[!] No atoms matched the selection query.\n\n";
+						selection.reset();
+					}
+					triggerMutationAnalysis = true;  // auto-trigger variant fetch like A-key
 				}
 			}
 			else if (commandWords.size() >= 4 && commandWords[0] == "mutate") {
@@ -2169,6 +2678,28 @@ void renderingThread() {
 				std::cout << "Selection cleared" << std::endl;
 			}
 
+			// In the command parsing loop, add:
+			else if (commandWords.size() == 2 && commandWords[0] == "repr") {
+				if (commandWords[1] == "ribbon") {
+					representationRenderer.toggleRepresentation(RepresentationType::RIBBON);
+				}
+				else if (commandWords[1] == "surface") {
+					representationRenderer.toggleRepresentation(RepresentationType::SURFACE);
+				}
+				else if (commandWords[1] == "ballandstick") {
+					representationRenderer.toggleRepresentation(RepresentationType::BALL_AND_STICK);
+				}
+				else if (commandWords[1] == "vdw") {
+					representationRenderer.setSurfaceType(SurfaceTemplate::SurfaceType::VAN_DER_WAALS);
+				}
+				else if (commandWords[1] == "sas") {
+					representationRenderer.setSurfaceType(SurfaceTemplate::SurfaceType::SOLVENT_ACCESSIBLE);
+				}
+				else if (commandWords[1] == "ses") {
+					representationRenderer.setSurfaceType(SurfaceTemplate::SurfaceType::SOLVENT_EXCLUDED);
+				}
+			}
+
 			// NEW COMMAND: Highlight currently selected residue
 			else if (commandWords.size() >= 2 && commandWords[0] == "highlight") {
 				if (commandWords.size() == 2) {
@@ -2205,6 +2736,7 @@ void renderingThread() {
 					mutantMoleculeData = new PDBFile(mutantPdbContent, true);
 
 					if (mutantMoleculeData && !mutantMoleculeData->atoms.empty()) {
+						g_perfLog.beginTimer(PerformanceLogger::MetricType::LOAD_MUTANT_MODEL, mutFocus.variantId);
 						buildComparison(
 							structureComparison,
 							moleculeData,
@@ -2216,6 +2748,37 @@ void renderingThread() {
 						);
 						std::cout << "[COMPARISON] Built. Global RMSD: "
 							<< structureComparison.globalRmsd << " Å\n";
+
+						// Compute sidechain atom classification once — stored in mutFocus so
+						// applyMutationHighlight and the Mutant Viewer panel share one source.
+						{
+							static const std::set<std::string> BB = { "N","CA","C","O" };
+							char ch = mutFocus.chain.empty() ? 'A' : mutFocus.chain[0];
+							int  pos = mutFocus.position;
+
+							std::set<std::string> wtNames, mutNames;
+							for (const auto& a : moleculeData->atoms)
+								if (a.residueNum == pos && a.chain == ch && !BB.count(a.name))
+									wtNames.insert(a.name);
+							for (const auto& a : mutantMoleculeData->atoms)
+								if (a.residueNum == pos && a.chain == ch && !BB.count(a.name))
+									mutNames.insert(a.name);
+
+							mutFocus.lostAtoms.clear();
+							mutFocus.gainedAtoms.clear();
+							mutFocus.sharedAtoms.clear();
+
+							for (auto& n : wtNames)
+								(mutNames.count(n) ? mutFocus.sharedAtoms : mutFocus.lostAtoms)
+								.push_back(n);
+							for (auto& n : mutNames)
+								if (!wtNames.count(n)) mutFocus.gainedAtoms.push_back(n);
+
+							std::sort(mutFocus.lostAtoms.begin(), mutFocus.lostAtoms.end());
+							std::sort(mutFocus.gainedAtoms.begin(), mutFocus.gainedAtoms.end());
+							std::sort(mutFocus.sharedAtoms.begin(), mutFocus.sharedAtoms.end());
+						}
+						g_perfLog.endTimer(PerformanceLogger::MetricType::LOAD_MUTANT_MODEL);
 					}
 					else {
 						std::cerr << "[COMPARISON] Failed to parse mutant PDB from: "
@@ -2281,6 +2844,11 @@ void renderingThread() {
 
 				std::cout << "Reset to default view" << std::endl;
 			}
+			else if (commandWords.size() >= 2 && commandWords[0] == "color") 
+			{
+				ColorCommand colorCmd(&commandWords, &selection);
+				colorCmd.execute();
+			}
 			else {
 				std::cerr << "\n[!] Unknown command: \"" << commandWords[0] << "\"\n\n"
 					<< "  Available commands:\n"
@@ -2328,6 +2896,10 @@ void renderingThread() {
 		io.DisplaySize = ImVec2(windowWidth, windowHeight);
 
 		ImGui::NewFrame();
+
+		renderMoleculeStats();      
+
+		welcome.draw();
 		//imguiWantsMouse = ImGui::GetIO().WantCaptureMouse;  // ← refresh after NewFrame
 
 		// Check ImGui vs Menu
@@ -2733,6 +3305,8 @@ void renderingThread() {
 		ImGui::End(); // Legend window ends
 
 
+		// AI Assistant Start
+		/*
 		ImGui::SetNextWindowPos(
 			ImVec2((float)window.getWidth() - 420.0f, (float)window.getHeight() - 380.0f),
 			ImGuiCond_FirstUseEver
@@ -2833,19 +3407,60 @@ void renderingThread() {
 
 			// ── Build MutationContext from current mutFocus state ─────
 			MutationContext ctx;
-			ctx.proteinName = currentPdbId.empty() ? std::nullopt
-				: std::optional<std::string>(currentPdbId);
+			//ctx.proteinName = currentPdbId.empty() ? std::nullopt
+			//	: std::optional<std::string>(currentPdbId);
 
 			if (mutFocus.show && !mutFocus.variantId.empty()) {
 				if (!mutFocus.wtAA.empty())  ctx.wildTypeAA = mutFocus.wtAA;
 				if (!mutFocus.mutAA.empty()) ctx.mutantAA = mutFocus.mutAA;
 				if (mutFocus.position > 0)   ctx.residueNum = mutFocus.position;
 				if (!mutFocus.chain.empty()) ctx.chain = mutFocus.chain;
+				if (!mutFocus.uniprotId.empty())
+					ctx.uniprotId = mutFocus.uniprotId;
+				if (mutFocus.uniprotPosition > 0)
+					ctx.uniprotResidueNum = mutFocus.uniprotPosition;
 
 				if (!mutFocus.analyzing) {
 					ctx.amScore = mutFocus.amScore;
 					ctx.amClass = mutFocus.amClass;
 					ctx.ddg = mutFocus.ddg;
+				}
+
+				if (selectedAtomIndex && moleculeData) {
+					const Atom& atom = moleculeData->atoms[*selectedAtomIndex];
+					int  resNum = atom.residueNum;
+					char chain = atom.chain;
+
+					SecondaryStructure ss = SecondaryStructure::COIL; // default
+
+					for (const auto& helix : moleculeData->helices) {
+						if (helix.chain == chain &&
+							resNum >= helix.residueStart &&
+							resNum <= helix.residueEnd) {
+							ss = helixTypeFromPDB(helix.type); // gives HELIX_ALPHA, HELIX_PI, HELIX_310
+							break;
+						}
+					}
+
+					if (ss == SecondaryStructure::COIL) {
+						for (const auto& sheet : moleculeData->sheets) {
+							if (sheet.chain == chain &&
+								resNum >= sheet.residueStart &&
+								resNum <= sheet.residueEnd) {
+								ss = SecondaryStructure::SHEET;
+								break;
+							}
+						}
+					}
+
+					// getSecondaryStructureName() returns "Alpha Helix", "Beta Sheet", "Coil", etc.
+					ctx.secondaryStructure = getSecondaryStructureName(ss);
+
+					std::cout << "[SS] Residue " << atom.residueName << atom.residueNum
+						<< " Chain " << chain
+						<< " -> " << *ctx.secondaryStructure
+						<< " (helices=" << moleculeData->helices.size()
+						<< " sheets=" << moleculeData->sheets.size() << ")\n";
 				}
 			}
 
@@ -2864,6 +3479,14 @@ void renderingThread() {
 			}
 
 			// ── Fire async query ──────────────────────────────────────
+			// Copy UniProt variant summary into context before Claude query
+			{
+				std::lock_guard<std::mutex> lock(uniprotDataMutex);
+				if (!uniprotVariantSummary.empty()) {
+					ctx.uniprotVariantSummary = uniprotVariantSummary;
+				}
+			}
+
 			bool sent = claudeHandler.query(ctx, userMessage, nullptr); // poll-based, no callback
 			if (sent) {
 				claudePending = true;
@@ -2873,7 +3496,313 @@ void renderingThread() {
 			}
 		}
 
+		ImGui::End();  
+		*/
+		
+		// === START REPLACEMENT CODE ===
+
+		// ═══════════════════════════════════════════════════════════════════
+		// AI ASSISTANT PANEL - IMPROVED
+		// ═══════════════════════════════════════════════════════════════════
+
+		ImGui::SetNextWindowPos(
+			ImVec2((float)window.getWidth() - 820.0f, (float)window.getHeight() - 756.0f),
+			ImGuiCond_FirstUseEver
+		);
+		ImGui::SetNextWindowSizeConstraints(ImVec2(380.0f, 300.0f), ImVec2(800.0f, 900.0f));
+		ImGui::SetNextWindowSize(ImVec2(800.0f, 736.0f), ImGuiCond_FirstUseEver);
+
+		ImGui::Begin("AI Assistant", nullptr, ImGuiWindowFlags_None);
+
+		// ── Header ─────────────────────────────────────────────────────────
+		ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "AI Chat Assistant");
+
+		if (mutFocus.show && !mutFocus.variantId.empty()) {
+			ImGui::SameLine();
+			ImGui::TextDisabled(" | %s", mutFocus.variantId.c_str());
+		}
+
+		ImGui::Separator();
+
+		// ── Controls row: Height slider + Copy + Clear ─────────────────────
+		// Max height is dynamic: window height minus space for input area (120px)
+		float maxAllowedHeight = ImGui::GetContentRegionAvail().y - 100.0f;
+		if (maxAllowedHeight < 100.0f) maxAllowedHeight = 100.0f;
+		
+		if (ImGui::Button("Copy Last")) {
+			std::lock_guard<std::mutex> lk(chatMutex);
+			if (!lastAssistantResponse.empty()) {
+				ImGui::SetClipboardText(lastAssistantResponse.c_str());
+			}
+		}
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Copy last AI response to clipboard (Ctrl+C)");
+		}
+
+		ImGui::SameLine();
+		if (ImGui::Button("Clear Chat")) {
+			std::lock_guard<std::mutex> lk(chatMutex);
+			chatHistory.clear();
+			lastAssistantResponse.clear();
+			lastChatSize = 0;
+		}
+
+		ImGui::SameLine();
+		ImGui::Checkbox("Auto-scroll", &chatAutoScroll);
+
+		ImGui::Spacing();
+
+		// ── Chat history region with adjustable height ─────────────────────
+		float inputAreaHeight = 85.0f;
+		float maxChatHeight = ImGui::GetContentRegionAvail().y - inputAreaHeight;
+		float actualHeight = (chatWindowHeight < maxChatHeight) ? chatWindowHeight : maxChatHeight;
+		if (actualHeight < 60.0f) actualHeight = 60.0f;
+
+		ImGui::BeginChild("ChatHistory", ImVec2(0, actualHeight), true,
+			ImGuiWindowFlags_HorizontalScrollbar);
+		{
+			std::lock_guard<std::mutex> lk(chatMutex);
+
+			for (size_t i = 0; i < chatHistory.size(); ++i) {
+				const auto& msg = chatHistory[i];
+				ImGui::PushID(static_cast<int>(i));
+
+				if (msg.rfind("You:", 0) == 0) {
+					std::string content = (msg.size() > 5) ? msg.substr(5) : "";
+
+					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 0.8f, 1.0f, 1.0f));
+					ImGui::Text("You:");
+					ImGui::PopStyleColor();
+
+					float wrapWidth = ImGui::GetContentRegionAvail().x - 20.0f;
+					ImVec2 textSize = ImGui::CalcTextSize(content.c_str(), nullptr, false, wrapWidth);
+					float boxHeight = textSize.y + 16.0f;
+					if (boxHeight < 36.0f) boxHeight = 36.0f;
+					if (boxHeight > 200.0f) boxHeight = 200.0f;
+
+					ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.08f, 0.12f, 0.18f, 0.9f));
+					ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8.0f, 8.0f));
+
+					std::string childId = "##userChild" + std::to_string(i);
+					ImGui::BeginChild(childId.c_str(), ImVec2(-1.0f, boxHeight), true, ImGuiWindowFlags_None);
+
+					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.85f, 1.0f, 1.0f));
+					ImGui::PushTextWrapPos(ImGui::GetContentRegionAvail().x);
+					ImGui::TextWrapped("%s", content.c_str());
+					ImGui::PopTextWrapPos();
+					ImGui::PopStyleColor();
+
+					ImGui::EndChild();
+					ImGui::PopStyleVar();
+					ImGui::PopStyleColor();
+
+					if (ImGui::SmallButton(("Copy##user" + std::to_string(i)).c_str()))
+						ImGui::SetClipboardText(content.c_str());
+				}
+				else if (msg.rfind("Assistant:", 0) == 0) {
+					// Assistant message - green with copy button
+					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.3f, 0.9f, 0.3f, 1.0f));
+
+					// Extract content after "Assistant: "
+					std::string content = (msg.size() > 11) ? msg.substr(11) : "";
+
+					// Display label
+					ImGui::Text("Assistant:");
+					ImGui::PopStyleColor();
+
+					// Calculate wrapped text height
+					float wrapWidth = ImGui::GetContentRegionAvail().x - 20.0f;
+					ImVec2 textSize = ImGui::CalcTextSize(content.c_str(), nullptr, false, wrapWidth);
+					float boxHeight = textSize.y + 16.0f;
+					if (boxHeight < 40.0f) boxHeight = 40.0f;
+					if (boxHeight > 400.0f) boxHeight = 400.0f;  // Allow taller boxes for long responses
+
+					// Response box with wrapped text inside a child window
+					ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.12f, 0.12f, 0.12f, 0.9f));
+					ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8.0f, 8.0f));
+
+					std::string childId = "##respChild" + std::to_string(i);
+					ImGui::BeginChild(childId.c_str(), ImVec2(-1.0f, boxHeight), true,
+						ImGuiWindowFlags_None);  // Allow scrollbar for long responses
+
+					// Wrapped text with light green color
+					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.85f, 0.95f, 0.85f, 1.0f));
+					ImGui::PushTextWrapPos(ImGui::GetContentRegionAvail().x);
+					ImGui::TextWrapped("%s", content.c_str());
+					ImGui::PopTextWrapPos();
+					ImGui::PopStyleColor();
+
+					ImGui::EndChild();
+
+					ImGui::PopStyleVar();
+					ImGui::PopStyleColor();
+
+					// Copy button for this response
+					if (ImGui::SmallButton(("Copy##" + std::to_string(i)).c_str())) {
+						ImGui::SetClipboardText(content.c_str());
+					}
+				}
+				else {
+					// System message - gray
+					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.55f, 0.55f, 0.55f, 1.0f));
+					ImGui::TextWrapped("%s", msg.c_str());
+					ImGui::PopStyleColor();
+				}
+
+				ImGui::Spacing();
+				ImGui::PopID();
+			}
+
+			// ── Smart auto-scroll ──────────────────────────────────────────
+			if (chatAutoScroll && chatHistory.size() > lastChatSize) {
+				ImGui::SetScrollHereY(1.0f);
+				lastChatSize = chatHistory.size();
+			}
+		}
+
+		// Thinking indicator
+		if (claudePending) {
+			static float dotTimer = 0.0f;
+			dotTimer += ImGui::GetIO().DeltaTime;
+			int dots = ((int)(dotTimer * 2.5f)) % 4;
+			std::string thinking = "Thinking" + std::string(dots, '.');
+			ImGui::TextColored(ImVec4(1.0f, 0.9f, 0.3f, 1.0f), "%s", thinking.c_str());
+		}
+
+		ImGui::EndChild();
+
+		// ── Input area ─────────────────────────────────────────────────────
+		ImGui::Separator();
+		ImGui::Spacing();
+
+		bool submitOnEnter = ImGui::IsKeyPressed(ImGuiKey_Enter)
+		&& !ImGui::GetIO().KeyShift
+		&& ImGui::IsItemFocused();
+
+		ImGui::SetNextItemWidth(-1);
+		ImGui::InputTextMultiline(
+			"##chat_input",
+			chatInputBuffer, sizeof(chatInputBuffer),
+			ImVec2(-1.0f, 38.0f),
+			ImGuiInputTextFlags_EnterReturnsTrue
+		);
+
+		bool sendPressed = ImGui::Button("Send", ImVec2(70, 0));
+
+		if (mutFocus.show && !mutFocus.variantId.empty()) {
+			ImGui::SameLine();
+			if (ImGui::Button("Ask about mutation")) {
+				std::snprintf(
+					chatInputBuffer, sizeof(chatInputBuffer),
+					"Explain %s (DDG %+.2f, AM %s %.2f)",
+					mutFocus.variantId.c_str(),
+					mutFocus.ddg,
+					mutFocus.amClass.c_str(),
+					mutFocus.amScore
+				);
+			}
+		}
+
+		// ── Send logic ─────────────────────────────────────────────────────
+		if ((sendPressed || submitOnEnter) && strlen(chatInputBuffer) > 0 && !claudePending) {
+			std::string userMessage(chatInputBuffer);
+			addChatMessage("You", userMessage);
+			chatInputBuffer[0] = '\0';
+
+			// Build MutationContext
+			MutationContext ctx;
+
+			if (mutFocus.show && !mutFocus.variantId.empty()) {
+				if (!mutFocus.wtAA.empty())  ctx.wildTypeAA = mutFocus.wtAA;
+				if (!mutFocus.mutAA.empty()) ctx.mutantAA = mutFocus.mutAA;
+				if (mutFocus.position > 0)   ctx.residueNum = mutFocus.position;
+				if (!mutFocus.chain.empty()) ctx.chain = mutFocus.chain;
+				if (!mutFocus.uniprotId.empty())
+					ctx.uniprotId = mutFocus.uniprotId;
+				if (mutFocus.uniprotPosition > 0)
+					ctx.uniprotResidueNum = mutFocus.uniprotPosition;
+
+				if (!mutFocus.analyzing) {
+					ctx.amScore = mutFocus.amScore;
+					ctx.amClass = mutFocus.amClass;
+					ctx.ddg = mutFocus.ddg;
+				}
+
+				// Secondary structure lookup
+				if (selectedAtomIndex && moleculeData) {
+					const Atom& atom = moleculeData->atoms[*selectedAtomIndex];
+					int resNum = atom.residueNum;
+					char chain = atom.chain;
+
+					SecondaryStructure ss = SecondaryStructure::COIL;
+
+					for (const auto& helix : moleculeData->helices) {
+						if (helix.chain == chain &&
+							resNum >= helix.residueStart &&
+							resNum <= helix.residueEnd) {
+							ss = helixTypeFromPDB(helix.type);
+							break;
+						}
+					}
+
+					if (ss == SecondaryStructure::COIL) {
+						for (const auto& sheet : moleculeData->sheets) {
+							if (sheet.chain == chain &&
+								resNum >= sheet.residueStart &&
+								resNum <= sheet.residueEnd) {
+								ss = SecondaryStructure::SHEET;
+								break;
+							}
+						}
+					}
+
+					ctx.secondaryStructure = getSecondaryStructureName(ss);
+				}
+			}
+
+			// Add conversation history
+			{
+				std::lock_guard<std::mutex> lk(chatMutex);
+				const int MAX_HISTORY_TURNS = 6;
+				int start = std::max(0, (int)chatHistory.size() - MAX_HISTORY_TURNS * 2);
+				for (int i = start; i < (int)chatHistory.size(); ++i) {
+					const auto& entry = chatHistory[i];
+					if (entry.rfind("You: ", 0) == 0)
+						ctx.history.push_back({ "user", entry.substr(5) });
+					else if (entry.rfind("Assistant: ", 0) == 0)
+						ctx.history.push_back({ "assistant", entry.substr(11) });
+				}
+			}
+
+			// Add memory context
+			if (datalensMemory != nullptr) {
+				ctx.memoryContext = datalensMemory->buildMemoryContext(
+					currentPdbId, mutFocus.variantId);
+			}
+
+			// UniProt data
+			{
+				std::lock_guard<std::mutex> lk(uniprotDataMutex);
+				if (!uniprotVariantSummary.empty()) {
+					ctx.uniprotVariantSummary = uniprotVariantSummary;
+				}
+			}
+
+			// Fire async query
+			bool sent = claudeHandler.query(ctx, userMessage, nullptr);
+			if (sent) {
+				claudePending = true;
+			}
+			else {
+				addChatMessage("System", "A query is already in flight. Please wait.");
+			}
+		}
+
 		ImGui::End();  // AI Assistant end
+
+		// === END REPLACEMENT CODE ===
+			
+		// AI Assistant end
 
 		// Mutation Panel Starts 
 		if (mutationPanel.showWindow || mutationPanel.loading) {
@@ -2979,7 +3908,7 @@ void renderingThread() {
 		renderMutationFocusPanel(mutFocus);
 		renderComparisonPanel(structureComparison);
 
-
+		/*
 		// Mutant Viewer   
 		if (mutantMoleculeData != nullptr) {
 			ImGui::SetNextWindowPos(ImVec2(10.0f, 560.0f), ImGuiCond_FirstUseEver);
@@ -3060,6 +3989,178 @@ void renderingThread() {
 			ImGui::End();
 		}
 
+		*/
+
+		// Mutant Viewer
+		if (mutantMoleculeData != nullptr) {
+			ImGui::SetNextWindowPos(ImVec2(10.0f, 560.0f), ImGuiCond_FirstUseEver);
+			ImGui::SetNextWindowSize(ImVec2(310.0f, 420.0f), ImGuiCond_FirstUseEver);
+			ImGui::Begin("Mutant Viewer");
+
+			// ── Header ──────────────────────────────────────────────────────────
+			ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.8f, 1.0f),
+				"%s", mutFocus.variantId.c_str());
+			ImGui::SameLine();
+			ImGui::TextDisabled("Chain %s · Pos %d",
+				mutFocus.chain.c_str(), mutFocus.position);
+			ImGui::Separator();
+
+			// Secondary structure label
+			if (!mutFocus.secondaryStructure.empty()) {
+				ImVec4 ssColor =
+					(mutFocus.secondaryStructure.find("Helix") != std::string::npos)
+					? ImVec4(0.4f, 0.8f, 1.0f, 1.0f)   // blue  — helix
+					: (mutFocus.secondaryStructure.find("Sheet") != std::string::npos)
+					? ImVec4(0.4f, 1.0f, 0.5f, 1.0f)   // green — sheet
+					: ImVec4(0.6f, 0.6f, 0.6f, 1.0f);      // grey  — coil/loop
+
+				ImGui::TextColored(ssColor, "%s", mutFocus.secondaryStructure.c_str());
+				ImGui::SameLine();
+				ImGui::TextDisabled("· secondary structure");
+				ImGui::Spacing();
+			}
+
+			// ── DDG ─────────────────────────────────────────────────────────────
+			ImVec4 ddgColor = (mutFocus.ddg > 2.0f) ? ImVec4(0.9f, 0.2f, 0.2f, 1.f) :
+				(mutFocus.ddg > 0.5f) ? ImVec4(0.9f, 0.6f, 0.2f, 1.f) :
+				(mutFocus.ddg > -0.5f) ? ImVec4(0.8f, 0.8f, 0.8f, 1.f) :
+				ImVec4(0.2f, 0.9f, 0.4f, 1.f);
+			ImGui::TextColored(ddgColor, "DDG: %+.3f kcal/mol  %s",
+				mutFocus.ddg, mutFocus.ddgInterp.c_str());
+
+			ImGui::Spacing();
+			ImGui::Separator();
+			ImGui::Spacing();
+
+			// ── WT / Mutant toggle ───────────────────────────────────────────────
+			ImGui::Text("Viewing:");
+			ImGui::SameLine();
+			if (!showingMutant) {
+				ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.1f, 0.4f, 0.1f, 1.f));
+				ImGui::Button("Wildtype##active", ImVec2(90, 0));
+				ImGui::PopStyleColor();
+				ImGui::SameLine();
+				if (ImGui::Button("Mutant##switch", ImVec2(90, 0))) {
+					Model::loadMoleculeData(mutantMoleculeData);
+					applyMutationHighlight(moleculeData, mutantMoleculeData,
+						mutFocus.chain, mutFocus.position, true, mutFocus);
+					showingMutant = true;
+				}
+			}
+			else {
+				if (ImGui::Button("Wildtype##switch", ImVec2(90, 0))) {
+					
+					Model::loadMoleculeData(moleculeData);  // reload WT
+
+					// Restore all atom colors to default after dimming
+					Selection allSel;  // empty selection = entire molecule
+					Model::colorAtomsDefault(&allSel);
+
+					applyMutationHighlight(moleculeData, mutantMoleculeData,
+						mutFocus.chain, mutFocus.position, false, mutFocus);
+					showingMutant = false;
+					
+					//Model::loadMoleculeData(moleculeData);
+					//applyMutationHighlight(moleculeData, mutantMoleculeData,
+			//			mutFocus.chain, mutFocus.position, false, mutFocus);
+				//	showingMutant = false;
+				}
+				ImGui::SameLine();
+				ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.4f, 0.1f, 0.4f, 1.f));
+				ImGui::Button("Mutant##active", ImVec2(90, 0));
+				ImGui::PopStyleColor();
+			}
+
+			ImGui::Spacing();
+			ImGui::Separator();
+			ImGui::Spacing();
+
+			// ── Atom-level breakdown ─────────────────────────────────────────────
+			// Reads directly from mutFocus — computed once at loadmutant time.
+			// No per-frame atom array scanning.
+			if (!mutFocus.lostAtoms.empty() ||
+				!mutFocus.sharedAtoms.empty() ||
+				!mutFocus.gainedAtoms.empty())
+			{
+				// Residue name row
+				ImGui::TextColored(ImVec4(1.f, 0.6f, 0.2f, 1.f), "%-4s", mutFocus.wtAA.c_str());
+				ImGui::SameLine(); ImGui::TextDisabled("->");
+				ImGui::SameLine();
+				ImGui::TextColored(ImVec4(1.f, 0.4f, 1.f, 1.f), "%-4s", mutFocus.mutAA.c_str());
+				ImGui::SameLine();
+				ImGui::TextDisabled("  (%s -> %s)",
+					mutFocus.wtProps.c_str(), mutFocus.mutProps.c_str());
+
+				ImGui::Spacing();
+
+				// Atom table
+				ImGuiTableFlags tflags = ImGuiTableFlags_Borders
+					| ImGuiTableFlags_SizingStretchSame;
+				if (ImGui::BeginTable("##atombreakdown", 3, tflags)) {
+					ImGui::TableSetupColumn("Lost (WT only)");
+					ImGui::TableSetupColumn("Shared");
+					ImGui::TableSetupColumn("Gained (Mut only)");
+					ImGui::TableHeadersRow();
+
+					int rows = (int)std::max({
+						mutFocus.lostAtoms.size(),
+						mutFocus.sharedAtoms.size(),
+						mutFocus.gainedAtoms.size() });
+
+					for (int r = 0; r < rows; ++r) {
+						ImGui::TableNextRow();
+
+						ImGui::TableSetColumnIndex(0);
+						if (r < (int)mutFocus.lostAtoms.size())
+							ImGui::TextColored(ImVec4(1.f, 0.31f, 0.f, 1.f),
+								"%s", mutFocus.lostAtoms[r].c_str());
+
+						ImGui::TableSetColumnIndex(1);
+						if (r < (int)mutFocus.sharedAtoms.size())
+							ImGui::TextColored(ImVec4(0.47f, 0.63f, 1.f, 1.f),
+								"%s", mutFocus.sharedAtoms[r].c_str());
+
+						ImGui::TableSetColumnIndex(2);
+						if (r < (int)mutFocus.gainedAtoms.size())
+							ImGui::TextColored(ImVec4(1.f, 0.f, 1.f, 1.f),
+								"%s", mutFocus.gainedAtoms[r].c_str());
+					}
+					ImGui::EndTable();
+				}
+
+				// Color legend
+				ImGui::Spacing();
+				if (!mutFocus.lostAtoms.empty()) {
+					ImGui::TextColored(ImVec4(1.f, 0.31f, 0.f, 1.f), "[orange]");
+					ImGui::SameLine();
+					ImGui::TextWrapped("Atoms present in WT but absent in mutant.");
+				}
+				if (!mutFocus.gainedAtoms.empty()) {
+					ImGui::TextColored(ImVec4(1.f, 0.f, 1.f, 1.f), "[magenta]");
+					ImGui::SameLine();
+					ImGui::TextWrapped("Atoms present in mutant but absent in WT.");
+				}
+				if (!mutFocus.sharedAtoms.empty()) {
+					ImGui::TextColored(ImVec4(0.47f, 0.63f, 1.f, 1.f), "[blue]");
+					ImGui::SameLine();
+					ImGui::TextWrapped("Atoms present in both structures.");
+				}
+			}
+
+			ImGui::Spacing();
+
+			if (ImGui::Button("Close##mutviewer", ImVec2(-1, 0))) {
+				if (showingMutant && moleculeData) {
+					Model::loadMoleculeData(moleculeData);
+					showingMutant = false;
+				}
+				delete mutantMoleculeData;
+				mutantMoleculeData = nullptr;
+			}
+
+			ImGui::End();
+		}
+
 		// Render Variant Selector
 		if (showVariantPanel && !variantData.empty()) {
 
@@ -3086,16 +4187,25 @@ void renderingThread() {
 					std::string capVariantId = selectedVariantId;
 
 					// Get chain + PDB residue from selected atom
-					std::string capChain = "A";
+					std::string capChain = v.value("chain_id", "A");
 					int capResNum = capUniPos;
+					std::string capUniprotId = v.value("uniprot_id", "");
+
+					// Fallback: look up uniprot_id from allChains if not in variantData
+					if (capUniprotId.empty()) {
+						for (auto& ch : allChains) {
+							if (ch.value("chain_id", "") == capChain) {
+								capUniprotId = ch.value("uniprot_id", "");
+								break;
+							}
+						}
+					}
+					std::cerr << "[HANDLER1] capUniprotId=" << capUniprotId
+						<< " capUniPos=" << capUniPos << "\n";
 
 					if (selectedAtomIndex && moleculeData) {
 						const Atom& atom = moleculeData->atoms[*selectedAtomIndex];
 						std::lock_guard<std::mutex> lock(mutationPanel.dataMutex);
-						if (mutationPanel.chains.count(atom.chain)) {
-							capChain = std::string(1, atom.chain);
-							capResNum = atom.residueNum;
-						}
 					}
 
 					if (capAlt.empty() || capRef.empty()) {
@@ -3125,6 +4235,10 @@ void renderingThread() {
 					mutFocus.amClass = capClassification;
 					mutFocus.ddg = 0.0f;
 					mutFocus.ddgInterp = "Calculating...";
+					// ── ADD THESE TWO LINES ──────────────────────────────────────
+					mutFocus.uniprotId = capUniprotId;   // already fetched above from mapping API
+					mutFocus.uniprotPosition = capUniPos;  // already fetched above from mapping API
+
 					mutFocus.wtProps = (wtIt != oneToThree.end())
 						? getResidueProperties(wtIt->second) : "Unknown";
 					mutFocus.mutProps = (mutIt != oneToThree.end())
@@ -3386,13 +4500,456 @@ void renderingThread() {
 				}).detach();
 		}
 
+		/*
+		// Handler 3 — Fetch UniProt Variants
+		if (manualMut.fetchUniProtVariants && !manualMut.uniprotIdToFetch.empty()) {
+			manualMut.fetchUniProtVariants = false;
+			std::string capturedUniprotId = manualMut.uniprotIdToFetch;
+			int capturedPosition = manualMut.positionToFetch;
+			char capturedMutAA = manualMut.mutAA;  // The target mutation AA (e.g., 'P')
+
+			std::thread([capturedUniprotId, capturedPosition, capturedMutAA]() {
+				uniprotFetchRunning = true;
+				HTTPConnection http;
+				std::string url = "https://www.ebi.ac.uk/proteins/api/variation/" + capturedUniprotId;
+
+				std::cout << "[UNIPROT] Fetching variant at position " << capturedPosition
+					<< " (-> " << capturedMutAA << ") for " << capturedUniprotId << "...\n";
+
+				if (http.get(url)) {
+					try {
+						auto response = json::parse(http.getResponse());
+
+						if (response.contains("features")) {
+							int foundCount = 0;
+
+							for (auto& feature : response["features"]) {
+								if (feature.value("type", "") != "VARIANT") continue;
+
+								std::string beginStr = feature.value("begin", "0");
+								int pos = 0;
+								try { pos = std::stoi(beginStr); }
+								catch (...) { continue; }
+
+								// Filter by position
+								if (pos != capturedPosition) continue;
+
+								// Safe string helper
+								auto safeString = [&](const std::string& key) -> std::string {
+									if (!feature.contains(key)) return "";
+									if (feature[key].is_string()) return feature[key].get<std::string>();
+									return "";
+									};
+
+								std::string wildType = safeString("wildType");
+								std::string altSeq = safeString("alternativeSequence");
+
+								// Filter by mutation AA - altSeq must match capturedMutAA
+								if (altSeq.empty() || altSeq[0] != capturedMutAA) continue;
+
+								foundCount++;
+
+								std::cout << "\n══════════════════════════════════════════════════\n";
+								std::cout << "  " << wildType << " -> " << altSeq << " at position " << pos << "\n";
+								std::cout << "══════════════════════════════════════════════════\n";
+
+								std::string ftId = safeString("ftId");
+								if (!ftId.empty())
+									std::cout << "Accession:        " << ftId << "\n";
+
+								std::string consequenceType = safeString("consequenceType");
+								if (!consequenceType.empty())
+									std::cout << "Consequence:      " << consequenceType << "\n";
+
+								std::string codon = safeString("codon");
+								if (!codon.empty())
+									std::cout << "Codon:            " << codon << "\n";
+
+								if (feature.contains("somatic") && feature["somatic"].is_boolean()) {
+									std::cout << "Somatic:          " << (feature["somatic"].get<bool>() ? "Yes" : "No") << "\n";
+								}
+
+								std::string sourceType = safeString("sourceType");
+								if (!sourceType.empty())
+									std::cout << "Source type:      " << sourceType << "\n";
+
+								std::string cytogeneticBand = safeString("cytogeneticBand");
+								if (!cytogeneticBand.empty())
+									std::cout << "Cytogenetic band: " << cytogeneticBand << "\n";
+
+								// Predictions
+								if (feature.contains("predictions") && feature["predictions"].is_array()) {
+									std::cout << "\nPredictions:\n";
+									for (auto& pred : feature["predictions"]) {
+										std::string predType = pred.contains("predAlgorithmNameType") &&
+											pred["predAlgorithmNameType"].is_string() ?
+											pred["predAlgorithmNameType"].get<std::string>() : "";
+										std::string predValue = pred.contains("predictionValType") &&
+											pred["predictionValType"].is_string() ?
+											pred["predictionValType"].get<std::string>() : "";
+
+										std::cout << "  - " << predType << ": " << predValue;
+										if (pred.contains("score") && pred["score"].is_number())
+											std::cout << " (" << pred["score"].get<float>() << ")";
+										std::cout << "\n";
+									}
+								}
+
+								// Population frequencies
+								if (feature.contains("populationFrequencies") &&
+									feature["populationFrequencies"].is_array()) {
+									std::cout << "\nPopulation frequencies:\n";
+									for (auto& freq : feature["populationFrequencies"]) {
+										std::string source = freq.contains("source") && freq["source"].is_string() ?
+											freq["source"].get<std::string>() : "";
+										if (freq.contains("frequency") && freq["frequency"].is_number()) {
+											std::cout << "  - " << source << ": " << freq["frequency"].get<double>() << "\n";
+										}
+									}
+								}
+
+								// Clinical significances
+								if (feature.contains("clinicalSignificances") &&
+									feature["clinicalSignificances"].is_array()) {
+									std::cout << "\nClinical significance:\n";
+									for (auto& clin : feature["clinicalSignificances"]) {
+										if (clin.contains("type") && clin["type"].is_string())
+											std::cout << "  - " << clin["type"].get<std::string>() << "\n";
+									}
+								}
+
+								// Disease associations
+								if (feature.contains("association") && feature["association"].is_array()) {
+									std::cout << "\nDisease associations:\n";
+									for (auto& assoc : feature["association"]) {
+										if (assoc.contains("name") && assoc["name"].is_string())
+											std::cout << "  - " << assoc["name"].get<std::string>() << "\n";
+									}
+								}
+
+								// Cross-references
+								if (feature.contains("xrefs") && feature["xrefs"].is_array()) {
+									std::cout << "\nCross-references:\n";
+									for (auto& xref : feature["xrefs"]) {
+										std::string name = xref.contains("name") && xref["name"].is_string() ?
+											xref["name"].get<std::string>() : "";
+										std::string id = xref.contains("id") && xref["id"].is_string() ?
+											xref["id"].get<std::string>() : "";
+										std::cout << "  - " << name << ": " << id << "\n";
+									}
+								}
+
+								std::string description = safeString("description");
+								if (!description.empty())
+									std::cout << "\nDescription: " << description << "\n";
+
+								std::cout << "\n";
+							}
+
+							if (foundCount == 0) {
+								std::cout << "[UNIPROT] No variant found for position " << capturedPosition
+									<< " with mutation -> " << capturedMutAA << "\n";
+							}
+						}
+					}
+					catch (const json::exception& e) {
+						std::cerr << "[UNIPROT] Parse error: " << e.what() << "\n";
+					}
+				}
+				else {
+					std::cerr << "[UNIPROT] Failed to fetch for " << capturedUniprotId << "\n";
+				}
+				uniprotFetchRunning = false;
+				}).detach();
+		}
+		*/
+
+		// Handler 3 — Fetch UniProt Variants
+if (manualMut.fetchUniProtVariants && !manualMut.uniprotIdToFetch.empty()) {
+	manualMut.fetchUniProtVariants = false;
+	std::string capturedUniprotId = manualMut.uniprotIdToFetch;
+	int capturedPosition = manualMut.positionToFetch;
+	char capturedMutAA = manualMut.mutAA;
+
+	std::thread([capturedUniprotId, capturedPosition, capturedMutAA]() {
+		uniprotFetchRunning = true;
+		HTTPConnection http;
+		std::string url = "https://www.ebi.ac.uk/proteins/api/variation/" + capturedUniprotId;
+
+		std::cout << "[UNIPROT] Fetching variant at position " << capturedPosition
+			<< " (-> " << capturedMutAA << ") for " << capturedUniprotId << "...\n";
+
+		if (http.get(url)) {
+			try {
+				auto response = json::parse(http.getResponse());
+
+				if (response.contains("features") && response["features"].is_array()) {
+
+					// Safe string helper
+					auto safeString = [](const json& obj, const std::string& key) -> std::string {
+						if (!obj.contains(key)) return "";
+						if (obj[key].is_string()) return obj[key].get<std::string>();
+						return "";
+						};
+
+					for (auto& feature : response["features"]) {
+						if (safeString(feature, "type") != "VARIANT") continue;
+
+						// Parse position
+						std::string beginStr = safeString(feature, "begin");
+						int pos = 0;
+						try { pos = std::stoi(beginStr); }
+						catch (...) { continue; }
+
+						if (pos != capturedPosition) continue;
+
+						// Check mutation matches
+						std::string altSeq = safeString(feature, "alternativeSequence");
+						if (altSeq.empty() || altSeq[0] != capturedMutAA) continue;
+
+						// ═══════════════════════════════════════════════════════
+						// Found match — build summary string
+						// ═══════════════════════════════════════════════════════
+
+						std::ostringstream ss;
+
+						std::string wildType = safeString(feature, "wildType");
+						ss << "Variant: " << wildType << pos << altSeq << "\n";
+
+						std::string ftId = safeString(feature, "ftId");
+						if (!ftId.empty())
+							ss << "ID: " << ftId << "\n";
+
+						std::string consequence = safeString(feature, "consequenceType");
+						if (!consequence.empty())
+							ss << "Consequence: " << consequence << "\n";
+
+						std::string codon = safeString(feature, "codon");
+						if (!codon.empty())
+							ss << "Codon: " << codon << "\n";
+
+						std::string sourceType = safeString(feature, "sourceType");
+						if (!sourceType.empty())
+							ss << "Source: " << sourceType << "\n";
+
+						if (feature.contains("somatic") && feature["somatic"].is_boolean()) {
+							ss << "Somatic: " << (feature["somatic"].get<bool>() ? "Yes" : "No") << "\n";
+						}
+
+						// Predictions (PolyPhen, SIFT)
+						if (feature.contains("predictions") && feature["predictions"].is_array() &&
+							!feature["predictions"].empty()) {
+							ss << "\nPredictions:\n";
+							for (auto& pred : feature["predictions"]) {
+								std::string algName = safeString(pred, "predAlgorithmNameType");
+								std::string predVal = safeString(pred, "predictionValType");
+								ss << "  " << algName << ": " << predVal;
+								if (pred.contains("score") && pred["score"].is_number())
+									ss << " (" << pred["score"].get<float>() << ")";
+								ss << "\n";
+							}
+						}
+
+						// Clinical significances
+						if (feature.contains("clinicalSignificances") &&
+							feature["clinicalSignificances"].is_array() &&
+							!feature["clinicalSignificances"].empty()) {
+							ss << "\nClinical significance: ";
+							bool first = true;
+							for (auto& clin : feature["clinicalSignificances"]) {
+								std::string type = safeString(clin, "type");
+								if (!type.empty()) {
+									if (!first) ss << ", ";
+									ss << type;
+									first = false;
+								}
+							}
+							ss << "\n";
+						}
+
+						// Disease associations
+						if (feature.contains("association") && feature["association"].is_array() &&
+							!feature["association"].empty()) {
+							ss << "\nDisease associations:\n";
+							for (auto& assoc : feature["association"]) {
+								std::string name = safeString(assoc, "name");
+								if (!name.empty())
+									ss << "  - " << name << "\n";
+							}
+						}
+
+						// Population frequencies
+						if (feature.contains("populationFrequencies") &&
+							feature["populationFrequencies"].is_array() &&
+							!feature["populationFrequencies"].empty()) {
+							ss << "\nPopulation frequencies:\n";
+							for (auto& freq : feature["populationFrequencies"]) {
+								std::string source = safeString(freq, "source");
+								if (freq.contains("frequency") && freq["frequency"].is_number()) {
+									ss << "  " << source << ": " << freq["frequency"].get<double>() << "\n";
+								}
+							}
+						}
+
+						// Store the summary
+						std::string summary = ss.str();
+
+						// Print to console
+						std::cout << "\n══════════════════════════════════════════════════\n";
+						std::cout << summary;
+						std::cout << "══════════════════════════════════════════════════\n\n";
+
+						// Store in global for Claude (add mutex if needed)
+						{
+							std::lock_guard<std::mutex> lock(uniprotDataMutex);
+							uniprotVariantSummary = summary;
+						}
+
+						uniprotFetchRunning = false;
+						return;  // Found match, done
+					}
+
+					std::cout << "[UNIPROT] No variant found for " << capturedUniprotId
+						<< " pos " << capturedPosition << " -> " << capturedMutAA << "\n";
+				}
+			}
+			catch (const json::exception& e) {
+				std::cerr << "[UNIPROT] Parse error: " << e.what() << "\n";
+			}
+		}
+		else {
+			std::cerr << "[UNIPROT] Failed to fetch for " << capturedUniprotId << "\n";
+		}
+		uniprotFetchRunning = false;
+		}).detach();
+}
+
 		ImGui::Render();
 
 		// ImGui::EndFrame();
 
 		Window::clear(0, 0, 0);
-		Model::render(Shader::getSphereDefault(), Shader::getConnectorDefault(), &window, &camera);
 
+		g_perfLog.beginTimer(PerformanceLogger::MetricType::RENDER_FRAME,
+			currentPdbId,
+			moleculeData ? (int)moleculeData->atoms.size() : 0);
+
+		Model::render(Shader::getSphereDefault(), Shader::getConnectorDefault(), &window, &camera);
+		g_perfLog.endTimer(PerformanceLogger::MetricType::RENDER_FRAME);
+
+		// Capture for live display
+		static auto lastRender = std::chrono::high_resolution_clock::now();
+		auto now = std::chrono::high_resolution_clock::now();
+		g_renderMs = std::chrono::duration<double, std::milli>(now - lastRender).count();
+		if (g_renderMs > 0) g_renderFps = g_renderFps * 0.9 + (1000.0 / g_renderMs) * 0.1;
+		lastRender = now;
+
+
+		float identityMatrix[16] = {
+			1.0f, 0.0f, 0.0f, 0.0f,
+			0.0f, 1.0f, 0.0f, 0.0f,
+			0.0f, 0.0f, 1.0f, 0.0f,
+			0.0f, 0.0f, 0.0f, 1.0f
+			};
+
+		// std::cout << "Ribbon vertices: " << representationRenderer.getRibbonVertexCount() << std::endl;
+		// std::cout << "Surface vertices: " << representationRenderer.getSurfaceVertexCount() << std::endl;
+
+		
+		if (representationRenderer.getRibbonVertexCount() > 0 ||
+			representationRenderer.getSurfaceVertexCount() > 0) {
+			//representationRenderer.render(ribbonShader, surfaceShader, &window, &camera, identityMatrix);
+			continue;
+		}
+		
+		// ── Atom name labels ─────────────────────────────────────────────────────
+		// Draw PDB atom name labels in 3D space for the currently selected residue.
+		// Labels are drawn on ImGui's background draw list — rendered on top of the
+		// OpenGL scene but behind all ImGui windows, so they never obscure panels.
+		//
+		// Projection: read the MVP matrices back from the active sphere shader program
+		// (they were just uploaded by Model::render), multiply on the CPU, divide by w,
+		// map NDC [-1,1] to screen pixels. No Mat4 internals needed.
+		if (selectedAtomIndex && moleculeData) {
+			const Atom& sel = moleculeData->atoms[*selectedAtomIndex];
+			int  labelResNum = sel.residueNum;
+			char labelChain = sel.chain;
+
+			// Read the three 4x4 matrices from the sphere shader that just ran.
+			// Column-major layout matches GLSL mat4 and glUniformMatrix4fv default.
+			GLuint progID = Shader::getSphereDefault()->getID();
+			float M[16], V[16], P[16];
+			glGetUniformfv(progID, glGetUniformLocation(progID, "u_model"), M);
+			glGetUniformfv(progID, glGetUniformLocation(progID, "u_view"), V);
+			glGetUniformfv(progID, glGetUniformLocation(progID, "u_projection"), P);
+
+			// Multiply two column-major 4x4 float arrays: out = A * B
+			auto mul44 = [](const float* A, const float* B, float* out) {
+				for (int col = 0; col < 4; ++col)
+					for (int row = 0; row < 4; ++row) {
+						float sum = 0.f;
+						for (int k = 0; k < 4; ++k)
+							sum += A[k * 4 + row] * B[col * 4 + k];
+						out[col * 4 + row] = sum;
+					}
+				};
+
+			// Build MVP = P * V * M
+			float VM[16], MVP[16];
+			mul44(V, M, VM);
+			mul44(P, VM, MVP);
+
+			// Project a world-space point through MVP → NDC → screen pixels.
+			// Returns {-1,-1} if the point is behind the camera (w <= 0).
+			float W = (float)window.getWidth();
+			float H = (float)window.getHeight();
+			auto project = [&](float wx, float wy, float wz) -> ImVec2 {
+				// Column-major MVP multiply for a vec4(wx,wy,wz,1)
+				float cx = MVP[0] * wx + MVP[4] * wy + MVP[8] * wz + MVP[12];
+				float cy = MVP[1] * wx + MVP[5] * wy + MVP[9] * wz + MVP[13];
+				// float cz = MVP[2]*wx + MVP[6]*wy + MVP[10]*wz + MVP[14]; // not needed
+				float cw = MVP[3] * wx + MVP[7] * wy + MVP[11] * wz + MVP[15];
+				if (cw <= 0.f) return { -1.f, -1.f };   // behind camera
+				float ndcX = cx / cw;
+				float ndcY = cy / cw;
+				// NDC [-1,1] → screen pixels; Y is flipped (OpenGL Y-up, screen Y-down)
+				return {
+					(ndcX + 1.f) * 0.5f * W,
+					(1.f - (ndcY + 1.f) * 0.5f) * H
+				};
+				};
+
+			ImDrawList* dl = ImGui::GetBackgroundDrawList();
+
+			for (const auto& atom : moleculeData->atoms) {
+				if (atom.residueNum != labelResNum || atom.chain != labelChain) continue;
+
+				ImVec2 screen = project(
+					atom.coords.getX(),
+					atom.coords.getY(),
+					atom.coords.getZ()
+				);
+
+				// Skip atoms behind the camera or outside the viewport
+				if (screen.x < 0 || screen.y < 0) continue;
+				if (screen.x > W || screen.y > H)  continue;
+
+				// Choose label color by atom role:
+				// backbone (N,CA,C,O) → dim grey so sidechain names stand out
+				// sidechain           → white
+				static const std::set<std::string> BB = { "N","CA","C","O" };
+				bool isBackbone = BB.count(atom.name) > 0;
+				ImU32 textColor = isBackbone
+					? IM_COL32(160, 160, 160, 200)
+					: IM_COL32(255, 255, 255, 255);
+
+				// Thin dark shadow first so the label is readable on any background
+				dl->AddText({ screen.x + 1.f, screen.y + 1.f },
+					IM_COL32(0, 0, 0, 180), atom.name.c_str());
+				dl->AddText(screen, textColor, atom.name.c_str());
+			}
+		}
+		// ── End atom name labels ──────────────────────────────────────────────────
 
 		// Render ImGui draw data
 		//ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
@@ -3411,6 +4968,20 @@ void renderingThread() {
 	}
 	ImGui::SetCurrentContext(mainImGuiContext);
 
+	//representationRenderer.cleanup();
+
+	
+	if (ribbonShader) {
+		delete ribbonShader;
+		ribbonShader = nullptr;
+	}
+	if (surfaceShader) {
+		delete surfaceShader;
+		surfaceShader = nullptr;
+	}
+	
+	g_perfLog.exportAll("datalens_perf");
+
 	// Order matters: OpenGL backend must be shut down before GLFW backend, and both
 	// before DestroyContext. Reversing this order causes a use-after-free on the
 	// ImDrawData that GLFW holds a reference to.
@@ -3420,9 +4991,12 @@ void renderingThread() {
 
 	Shader::freeResources();
 	ResourceManager::freeResources();
+
+
 }
 
-void buildAtomToResidueMapping(MoleculeData* moleculeData) {
+void buildAtomToResidueMapping(MoleculeData* moleculeData)
+{
 	atomIndexToDisplayInfo.clear();
 
 	// Builds a flat index from atom array position → display info (residue name,

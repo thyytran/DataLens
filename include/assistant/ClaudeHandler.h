@@ -22,8 +22,14 @@ struct MutationContext {
     std::optional<std::string> pdbId;          // e.g. "7LMK"
     std::optional<std::string> chain;
     std::optional<int>         residueNum;
+    std::optional<int>         uniprotResidueNum;   // same position in UniProt sequence space
+                                                    // (may differ from PDB residueNum due to
+                                                    // insertion codes / missing residues)
+                                                    // populated by SIFTS mapping in backend
+
     std::optional<std::string> wildTypeAA;     // single-letter, e.g. "R"
     std::optional<std::string> mutantAA;       // single-letter, e.g. "H"
+    std::optional<std::string> secondaryStructure; // "helix" | "sheet" | "loop"
 
     // AlphaMissense
     std::optional<float>       amScore;        // 0.0 – 1.0
@@ -32,7 +38,47 @@ struct MutationContext {
     // FoldX
     std::optional<float>       ddg;            // ΔΔG in kcal/mol (positive = destabilizing)
 
-    // Injected by DataLensMemory — previous sessions, mutations, prior summaries
+
+    // ── Curated database annotations (populated by VariantDatabaseFetcher) ────
+
+    // ClinVar — expert-reviewed clinical classification
+    std::optional<std::string> clinvarId;         // e.g. "VCV000012375"
+    std::optional<std::string> clinvarClass;      // "Pathogenic" | "Likely pathogenic" |
+    // "Benign" | "VUS" | "Conflicting" etc.
+    std::optional<std::string> clinvarCondition;  // associated disease, e.g. "Li-Fraumeni syndrome"
+    std::optional<int>         clinvarStars;      // review status 0–4
+
+    // UniProt Swiss-Prot site annotations at this residue position
+    // Comma-separated list of features, e.g. "Active site; DNA-binding domain"
+    std::optional<std::string> uniprotSiteAnnotation;
+
+    // ─── UniProt Variant Data ────────────────────────────────────────────────────
+    std::optional<std::string> uniprotVariantId;          // e.g., "VAR_012345"
+    std::optional<std::string> uniprotConsequence;        // e.g., "missense"
+    std::optional<std::string> uniprotCodon;              // e.g., "CTG/CCG"
+    std::optional<float>       uniprotPolyphenScore;      // 0.0 - 1.0
+    std::optional<std::string> uniprotPolyphenPred;       // "benign", "possibly damaging", "probably damaging"
+    std::optional<float>       uniprotSiftScore;          // 0.0 - 1.0
+    std::optional<std::string> uniprotSiftPred;           // "tolerated", "deleterious"
+    std::optional<std::string> uniprotClinicalSignificance; // e.g., "Pathogenic"
+    std::optional<std::string> uniprotDiseaseAssociation; // e.g., "Breast-ovarian cancer..."
+    std::optional<bool>        uniprotSomatic;            // true if somatic variant
+    std::optional<std::string> uniprotSourceType;         // e.g., "large scale study"
+    std::optional<std::string> uniprotVariantSummary;  // pre-formatted UniProt variant info
+
+    // gnomAD population frequency
+    std::optional<float>       gnomadAF;         // allele frequency (0.0 – 1.0)
+    std::optional<int>         gnomadAC;         // allele count (raw observation count)
+    std::optional<std::string> gnomadPopmax;     // population with highest AF, e.g. "NFE"
+
+    // COSMIC somatic mutation observations (cancer)
+    std::optional<int>         cosmicCount;      // number of tumor samples with this variant
+    std::optional<std::string> cosmicCancerTypes; // e.g. "colorectal (412), lung (178)"
+    std::optional<std::string> cosmicId;          // e.g. "COSV52755335"
+
+    // ── Session state ─────────────────────────────────────────────────────────
+
+       // Injected by DataLensMemory — previous sessions, mutations, prior summaries
     std::string memoryContext;
 
     // Conversation history for multi-turn chat
@@ -40,6 +86,7 @@ struct MutationContext {
 
     std::string buildSystemPrompt() const;
     std::string buildUserMessage(const std::string& userQuery) const;
+
 };
 
 /*
@@ -69,6 +116,13 @@ public:
     void setApiKey(const std::string& key);
 
     /*
+    *  Optional: set COSMIC bearer token so fetchAll() can query COSMIC.
+    *  Token format: "Bearer <base64(email:password)>"
+    *  If not set, COSMIC enrichment is silently skipped.
+    */
+    void setCosmicToken(const std::string& bearerToken);
+
+    /*
      *  Fire-and-forget async query.
      *  onComplete is called on the worker thread when the response arrives.
      *  Returns false immediately if a query is already in flight.
@@ -86,6 +140,7 @@ public:
 
 private:
     std::string  apiKey;
+    std::string cosmicToken;   // optional — for COSMIC enrichment
 
     mutable std::mutex  resultMutex;
     std::string         pendingResult;
