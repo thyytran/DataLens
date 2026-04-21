@@ -6,6 +6,10 @@
 #include <vector>
 #include "../alphamissense/AlphaMissenseSummary.h"
 
+// Sidechain atom classification — populated once when mutant loads
+std::vector<std::string> lostAtoms;    // in WT only
+std::vector<std::string> gainedAtoms;  // in mutant only  
+std::vector<std::string> sharedAtoms;  // in both
 
 
 struct MutationPanel {
@@ -32,6 +36,14 @@ struct MutationFocusData {
     std::string wtProps = "";
     std::string mutProps = "";
     bool        analyzing = false;
+    std::string secondaryStructure;   
+    std::string uniprotId;        // "P38398"
+    int         uniprotPosition = 0;
+
+    // Sidechain atom name sets — computed once when mutant loads, read everywhere
+    std::vector<std::string> lostAtoms;    // in WT only  (orange in 3D)
+    std::vector<std::string> gainedAtoms;  // in mutant only (magenta in 3D)
+    std::vector<std::string> sharedAtoms;  // in both (blue in 3D)
 };
 
 struct ManualMutState {
@@ -40,6 +52,11 @@ struct ManualMutState {
     char mutAA = 'A';
     bool runManual = false;
     int selectedResidueIdx = 0;
+    // UniProt variant fetch
+    bool fetchUniProtVariants = false;
+    std::string uniprotIdToFetch = "";
+    int positionToFetch = 0;
+
 };
 
 extern MutationPanel    mutationPanel;
