@@ -35,6 +35,15 @@ lib/glm/cmake-build-debug/
 # ── GLFW docs (keep headers + .lib, ignore html docs) ─────────────────────
 lib/glfw-3.4.bin.WIN64/docs/
 
+# ── Test package ─────────────────────
+packages/
+*.signature.p7s
+
+# ── Performance log files & chat memory ─────────────────────
+datalens_perf_summary.csv
+datalens_perf_raw.csv
+memory.json
+
 # ── Runtime DLLs (document in README instead) ─────────────────────────────
 glew32.dll
 glfw3.dll
