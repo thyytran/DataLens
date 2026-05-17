@@ -32,9 +32,7 @@ Screenshots of the main interface, variant selector, structure comparison panel,
 - `alphamissense-variant-selector.png` — AlphaMissense scores across all 19 substitutions
 
 ### Presentation Files
-- [`docs/thesis_defense_slides.pdf`](docs/thesis_defense_slides.pdf) — defense slide deck (April 20, 2026)
-- [`docs/architecture_guide.pdf`](docs/architecture_guide.pdf) — real-time rendering architecture & design decisions
-- [`docs/defense_qa.pdf`](docs/defense_qa.pdf) — defense Q&A reference
+- [`docs/DataLens_Thesis_Presentation_final.ptpx`](docs/DataLens_Thesis_Presentation_final.ptpx) — defense slide deck: real-time rendering architecture & design decisions Q&A (April, 2026)
 
 ## Architecture
 
