@@ -17,6 +17,24 @@ DataLens unifies fragmented protein mutation analysis tools into a single intera
 
 ---
 
+## Project Resources
+
+### Demonstration Videos
+- **DataLens overview & live demo** — [YouTube link](https://www.youtube.com/watch?v=uvhiFokcT58&t=374s)
+
+### Screenshots
+Screenshots of the main interface, variant selector, structure comparison panel, and Claude-synthesized interpretation are in [`docs/screenshots/`](docs/screenshots/):
+- `y220c-full-integration.png` — Y220C Chain A Full Integration 
+- `mutation-landscape-panel.png` - Mutation Landscape Panel
+- `mutation-focus-panel-aa-wt-aa-mut.png` — Mutation Focus Panel
+- `mutant-viewing-mode-and-viewer-panel.png` - WildType vs Mutant Viewing Mode
+- `alphamissense-variant-selector.png` — AlphaMissense scores across all 19 substitutions
+
+### Presentation Files
+- [`docs/thesis_defense_slides.pdf`](docs/thesis_defense_slides.pdf) — defense slide deck (April 20, 2026)
+- [`docs/architecture_guide.pdf`](docs/architecture_guide.pdf) — real-time rendering architecture & design decisions
+- [`docs/defense_qa.pdf`](docs/defense_qa.pdf) — defense Q&A reference
+
 ## Architecture
 
 ```
@@ -68,8 +86,8 @@ Create `config.json` in the project root (excluded from git):
 
 ```json
 {
-    "openai_api_key": "your-key-here",
-    "backend_url": "http://localhost:8000"
+  "api_key": "your-api-key-here",
+  "backend_url": "your-backend-url",
 }
 ```
 
@@ -98,13 +116,10 @@ Click any atom in the 3D viewport to select a residue and trigger mutation analy
 
 | Protein | UniProt | PDB |
 |---------|---------|-----|
-| TP53 | P04637 | 7LMK |
-| BRCA1 | P38398 | 1JM7 |
-| Histone H4 | P62805 | — |
+| TP53 | P04637 | 2OCJ |
+| BRCA1 | P38398 | 1T29 |
 
 ---
-
-## Project Structure
 
 ```
 DataLens/
@@ -117,13 +132,15 @@ DataLens/
 │   ├── inspector/        behavior inspector, drawable mesh/model
 │   ├── mapper/           PDB ↔ UniProt coordinate mapping
 │   ├── math/             Vec, Mat, MathUtils
-│   ├── mutation/         analysis, FoldX pipeline, structure comparison
-│   └── openai/           OpenAI API client
+│   └── mutation/         analysis, FoldX pipeline, structure comparison
 ├── source/               implementations (.cpp, .inl)
 ├── lib/                  third-party dependencies (GLFW, GLEW, curl, GLM)
 ├── config.json           credentials (not committed)
 └── README.md
 ```
+## Project Resource
+### 
+
 
 ## Acknowledgements
 
