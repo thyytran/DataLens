@@ -1,6 +1,8 @@
 # DataLens
 **AI-Enhanced Interactive Protein Mutation Analysis System**
 
+![DataLens main interface](docs/screenshots/y220c-full-integration.png)
+
 DataLens unifies fragmented protein mutation analysis tools into a single interactive interface. Select any residue by clicking directly on the 3D structure, and get AlphaMissense pathogenicity scores, FoldX ΔΔG stability predictions, and natural language interpretation in under 3 seconds — compared to 15–30 minutes using traditional workflows.
 
 ---
@@ -24,7 +26,6 @@ DataLens unifies fragmented protein mutation analysis tools into a single intera
 
 ### Screenshots
 Screenshots of the main interface, variant selector, structure comparison panel, and Claude-synthesized interpretation are in [`docs/screenshots/`](docs/screenshots/):
-- `y220c-full-integration.png` — Y220C Chain A Full Integration 
 - `mutation-landscape-panel.png` - Mutation Landscape Panel
 - `mutation-focus-panel-aa-wt-aa-mut.png` — Mutation Focus Panel
 - `mutant-viewing-mode-and-viewer-panel.png` - WildType vs Mutant Viewing Mode
