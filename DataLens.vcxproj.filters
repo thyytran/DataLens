@@ -40,6 +40,13 @@
     <ClCompile Include="source\FetchPDB.cpp" />
     <ClCompile Include="source\UniProtService.cpp" />
     <ClCompile Include="source\mutation\StructureComparison.cpp" />
+    <ClCompile Include="source\Config.cpp" />
+    <ClCompile Include="source\assistant\ClaudeHandler.cpp" />
+    <ClCompile Include="source\assistant\DatalensMemory.cpp" />
+    <ClCompile Include="source\graphics\SurfaceTemplate.cpp" />
+    <ClCompile Include="source\graphics\RibbonTemplate.cpp" />
+    <ClCompile Include="source\graphics\RepresentationRenderer.cpp" />
+    <ClCompile Include="source\assistant\VariantDatabaseFetcher.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\HTTPConnection.h" />
@@ -164,10 +171,19 @@
     <ClInclude Include="include\UniProtService.h" />
     <ClInclude Include="include\graphics\Tooltip.h" />
     <ClInclude Include="include\mutation\StructureComparison.h" />
-    <ClInclude Include="..\..\..\..\..\DataLens\include\mutation\MutationState.h" />
-    <ClInclude Include="..\..\..\..\..\DataLens\include\bio\AlphaMissenseSummary.h" />
     <ClInclude Include="include\alphamissense\AlphaMissenseSummary.h" />
     <ClInclude Include="include\mutation\MutationState.h" />
+    <ClInclude Include="include\Config.h" />
+    <ClInclude Include="include\assistant\ClaudeHandler.h" />
+    <ClInclude Include="include\assistant\DatalensMemory.h" />
+    <ClInclude Include="include\graphics\RepresentationRenderer.h" />
+    <ClInclude Include="include\graphics\RepresentationType.h" />
+    <ClInclude Include="include\graphics\Ribbon.h" />
+    <ClInclude Include="include\graphics\RibbonTemplate.h" />
+    <ClInclude Include="include\graphics\SurfaceTemplate.h" />
+    <ClInclude Include="include\assistant\VariantDatabaseFetcher.h" />
+    <ClInclude Include="include\Welcomemodal.h" />
+    <ClInclude Include="include\PerformanceLogger.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="source\math\Mat.inl" />
@@ -238,5 +254,7 @@
     <None Include="lib\glfw-3.4.bin.WIN64\docs\html\vulkan_guide.html" />
     <None Include="lib\glfw-3.4.bin.WIN64\docs\html\window_8md.html" />
     <None Include="lib\glfw-3.4.bin.WIN64\docs\html\window_guide.html" />
+    <None Include="config.json" />
+    <None Include="packages.config" />
   </ItemGroup>
 </Project>
